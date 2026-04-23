@@ -1,0 +1,25 @@
+# Created by venv; see https://docs.python.org/3/library/venv.html
+# Database
+Backend/medquizz.db
+backend/medquizz.db
+*.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+
+# Node
+node_modules/
+dist/
+.env.local
+.env.production
+
+# Models
+models/
+*.safetensors
+
+# Offload
+offload/
