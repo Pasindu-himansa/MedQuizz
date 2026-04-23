@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+python-jose[cryptography]
+passlib
+python-multipart
+groq
+pydantic
+websockets
