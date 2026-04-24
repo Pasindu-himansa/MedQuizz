@@ -7,3 +7,4 @@ python-multipart
 groq
 pydantic
 websockets
+python-dotenv
