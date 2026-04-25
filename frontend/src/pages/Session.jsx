@@ -175,7 +175,7 @@ export default function Session() {
   if (finished) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="glass-card p-8 w-full max-w-md text-center">
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-8 w-full max-w-md text-center">
           <div className="text-6xl mb-4">🎉</div>
           <h1 className="text-2xl font-bold text-white mb-2">
             Session Complete!
@@ -183,7 +183,7 @@ export default function Session() {
           <p className="text-white/50 mb-6">Great studying everyone! 💪</p>
           <button
             onClick={() => navigate(`/score/${roomCode}`)}
-            className="glass-btn w-full text-white py-3 rounded-lg font-semibold mb-3"
+            className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold hover:bg-indigo-500/90 transition mb-3"
           >
             📊 View My Score
           </button>
@@ -201,8 +201,8 @@ export default function Session() {
   if (!question) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="glass-card p-8 text-center max-w-sm">
-          <div className="text-5xl mb-4 flex items-center justify-center gap-2 flex">
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-8 text-center max-w-sm">
+          <div className="text-5xl mb-4 flex items-center justify-center">
             <GiBrain size={32} color="white" />
           </div>
           <h2 className="text-xl font-bold text-white mb-2">
@@ -240,7 +240,7 @@ export default function Session() {
     <div className="min-h-screen p-4">
       <div className="max-w-2xl mx-auto">
         {/* Header */}
-        <div className="glass-card p-4 mb-4 flex justify-between items-center">
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-4 mb-4 flex justify-between items-center">
           <h1 className="text-lg font-bold text-white">MedQuizz 🩺</h1>
           <span className="text-white/50 text-sm">
             Q {question.question_number} / {question.total_questions}
@@ -251,7 +251,7 @@ export default function Session() {
         </div>
 
         {/* Question */}
-        <div className="glass-card p-6 mb-4">
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-6 mb-4">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs bg-indigo-500/30 text-indigo-200 px-3 py-1 rounded-full border border-indigo-400/30 font-medium uppercase">
               {mode}
@@ -377,17 +377,15 @@ export default function Session() {
           <button
             onClick={handleReveal}
             disabled={loading}
-            className="glass-btn w-full text-white py-3 rounded-xl font-semibold mb-4 disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-xl font-semibold mb-4 disabled:opacity-50 flex items-center justify-center gap-2 hover:bg-indigo-500/90 transition"
           >
             {loading ? (
               <>
-                <LoaderCircle />
-                Getting answer...
+                <LoaderCircle className="animate-spin" /> Getting answer...
               </>
             ) : (
               <>
-                <Eye />
-                Reveal Answer
+                <Eye /> Reveal Answer
               </>
             )}
           </button>
@@ -395,7 +393,7 @@ export default function Session() {
 
         {/* Revealed section */}
         {revealed && (
-          <div className="glass-card p-6 mb-4">
+          <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-6 mb-4">
             {/* SBA correct answer */}
             {mode === "sba" && (
               <h3 className="font-bold text-lg text-white mb-3 flex items-center gap-2">
@@ -408,7 +406,7 @@ export default function Session() {
 
             {/* T/F correct answers */}
             {mode === "tf" && (
-              <h3 className="font-bold text-lg text-white mb-3">
+              <h3 className="font-bold text-lg text-white mb-3 flex items-center gap-2">
                 <CircleCheck size={20} color="#67ea10" /> Answers Revealed
               </h3>
             )}
@@ -452,13 +450,11 @@ export default function Session() {
                 <button
                   onClick={handleExplain}
                   disabled={explaining}
-                  className="glass-btn-purple w-full text-white py-3 rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-full bg-purple-600/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-2 hover:bg-purple-600/90 transition"
                 >
                   {explaining ? (
                     <span className="flex items-center justify-center gap-2">
-                      <span>
-                        <GiBrain size={32} /> AI is thinking
-                      </span>
+                      <GiBrain size={24} /> AI is thinking
                       <span className="flex gap-1">
                         <span className="w-2 h-2 bg-white rounded-full animate-bounce"></span>
                         <span
@@ -484,7 +480,7 @@ export default function Session() {
             {isHost && (
               <button
                 onClick={handleNext}
-                className="glass-btn w-full text-white py-3 rounded-xl font-semibold mt-3 flex items-center justify-center gap-2"
+                className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-xl font-semibold mt-3 flex items-center justify-center gap-2 hover:bg-indigo-500/90 transition"
               >
                 Next Question <ArrowRight size={18} />
               </button>
