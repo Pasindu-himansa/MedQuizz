@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import API from "../api";
+import { IoStatsChartSharp } from "react-icons/io5";
 
 export default function ScorePage() {
   const { roomCode } = useParams();
@@ -16,12 +17,11 @@ export default function ScorePage() {
   }, []);
 
   const getGrade = (p) => {
-    if (p >= 90) return { label: "Excellent! 🏆", color: "text-yellow-300" };
-    if (p >= 75) return { label: "Great job! 🎉", color: "text-green-300" };
-    if (p >= 60) return { label: "Good effort! 👍", color: "text-blue-300" };
-    if (p >= 50)
-      return { label: "Keep studying! 📚", color: "text-orange-300" };
-    return { label: "Need more practice! 💪", color: "text-red-300" };
+    if (p >= 90) return { label: "Excellent! ", color: "text-yellow-300" };
+    if (p >= 75) return { label: "Great job! ", color: "text-green-300" };
+    if (p >= 60) return { label: "Good effort! ", color: "text-blue-300" };
+    if (p >= 50) return { label: "Keep studying! ", color: "text-orange-300" };
+    return { label: "Need more practice! ", color: "text-red-300" };
   };
 
   if (loading)
@@ -47,7 +47,9 @@ export default function ScorePage() {
       <div className="max-w-2xl mx-auto">
         {/* Score Card */}
         <div className="glass-card p-8 mb-4 text-center">
-          <div className="text-6xl mb-4">📊</div>
+          <div className="text-6xl mb-4">
+            <IoStatsChartSharp />
+          </div>
           <h1 className="text-2xl font-bold text-white mb-2">
             Session Complete!
           </h1>
