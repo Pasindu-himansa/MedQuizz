@@ -92,7 +92,7 @@ export default function CustomSession() {
               Custom Session <FilePlusCorner size={20} />
             </h1>
             <p className="text-white/50 text-sm">
-              Add past paper questions — AI reveals answers
+              Add your Own questions, AI reveals answers
             </p>
           </div>
           <button
