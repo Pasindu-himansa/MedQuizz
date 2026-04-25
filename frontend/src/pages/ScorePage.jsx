@@ -48,7 +48,7 @@ export default function ScorePage() {
         {/* Score Card */}
         <div className="glass-card p-8 mb-4 text-center">
           <div className="text-6xl mb-4">
-            <IoStatsChartSharp />
+            <IoStatsChartSharp size={32} color="white" />
           </div>
           <h1 className="text-2xl font-bold text-white mb-2">
             Session Complete!
