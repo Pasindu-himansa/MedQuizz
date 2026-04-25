@@ -85,10 +85,10 @@ export default function Dashboard() {
     <div className="min-h-screen p-4">
       <div className="max-w-2xl mx-auto">
         {/* Header */}
-        <div className="glass-card p-4 mb-4 flex justify-between items-center">
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-4 mb-4 flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold text-blue-400 flex items-center gap-2">
-              MedQuizz <GiHealthNormal size={20} color="blue" />{" "}
+              MedQuizz <GiHealthNormal size={20} color="blue" />
             </h1>
             <p className="text-white/60 text-sm">Welcome, {name}!</p>
           </div>
@@ -110,7 +110,7 @@ export default function Dashboard() {
         )}
 
         {/* Join Session */}
-        <div className="glass-card p-6 mb-4">
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-6 mb-4">
           <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-4">
             <UsersRound size={20} /> Join a Session
           </h2>
@@ -119,24 +119,23 @@ export default function Dashboard() {
             type="text"
             value={roomCode}
             onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-            className="glass-input w-full rounded-lg px-4 py-3 text-center text-2xl font-bold tracking-widest mb-4"
+            className="w-full bg-white/10 backdrop-blur-sm border border-white/25 text-white rounded-lg px-4 py-3 text-center text-2xl font-bold tracking-widest mb-4 outline-none focus:border-white/50 placeholder-white/40"
             placeholder="ABC123"
             maxLength={6}
           />
           <button
             onClick={handleJoin}
             disabled={loading}
-            className="glass-btn-green w-full text-white py-3 rounded-lg font-semibold disabled:opacity-50"
+            className="w-full bg-green-600/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold hover:bg-green-600/90 transition disabled:opacity-50"
           >
             {loading ? "Joining..." : "Join Session"}
           </button>
         </div>
 
         {/* Create Session */}
-        <div className="glass-card p-6 mb-4">
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-6 mb-4">
           <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-3">
-            <CirclePlus size={20} />
-            Create a Session
+            <CirclePlus size={20} /> Create a Session
           </h2>
           <p className="text-white/50 text-sm mb-4">
             Start a new study session with AI
@@ -150,7 +149,7 @@ export default function Dashboard() {
               <select
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
-                className="glass-input w-full rounded-lg px-4 py-3"
+                className="w-full bg-white/10 backdrop-blur-sm border border-white/25 text-white rounded-lg px-4 py-3 outline-none focus:border-white/50"
               >
                 {subjects.map((s) => (
                   <option key={s} value={s} className="bg-gray-900">
@@ -193,7 +192,7 @@ export default function Dashboard() {
                   <button
                     key={m.v}
                     onClick={() => setMode(m.v)}
-                    className={`p-3 rounded-xl border text-left transition ${
+                    className={`p-3 rounded-xl border text-left transition backdrop-blur-sm ${
                       mode === m.v
                         ? "border-indigo-400/50 bg-indigo-500/30"
                         : "border-white/20 hover:border-white/40"
@@ -213,7 +212,7 @@ export default function Dashboard() {
               <select
                 value={numQuestions}
                 onChange={(e) => setNumQuestions(parseInt(e.target.value))}
-                className="glass-input w-full rounded-lg px-4 py-3"
+                className="w-full bg-white/10 backdrop-blur-sm border border-white/25 text-white rounded-lg px-4 py-3 outline-none focus:border-white/50"
               >
                 {[5, 10, 15, 20, 30].map((n) => (
                   <option key={n} value={n} className="bg-gray-900">
@@ -226,7 +225,7 @@ export default function Dashboard() {
             <button
               onClick={handleCreate}
               disabled={loading}
-              className="glass-btn w-full text-white py-3 rounded-lg font-semibold disabled:opacity-50"
+              className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold hover:bg-indigo-500/90 transition disabled:opacity-50"
             >
               {loading ? "Creating..." : "Create Session"}
             </button>
@@ -234,14 +233,14 @@ export default function Dashboard() {
         </div>
 
         {/* Custom Session */}
-        <div className="glass-card p-6 mb-4">
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-6 mb-4">
           <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-3">
             <FilePlusCorner size={20} /> Custom Session
           </h2>
           <p className="text-white/50 text-sm mb-4">Add your own questions</p>
           <button
             onClick={() => navigate("/custom")}
-            className="glass-btn-purple w-full text-white py-3 rounded-lg font-semibold"
+            className="w-full bg-purple-600/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold hover:bg-purple-600/90 transition"
           >
             Create Custom Session
           </button>
