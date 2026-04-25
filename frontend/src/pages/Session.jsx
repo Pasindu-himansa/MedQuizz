@@ -202,7 +202,9 @@ export default function Session() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="glass-card p-8 text-center max-w-sm">
-          <div className="text-5xl mb-4">🤖</div>
+          <div className="text-5xl mb-4">
+            <GiBrain size={32} />
+          </div>
           <h2 className="text-xl font-bold text-white mb-2">
             AI is generating your question...
           </h2>
