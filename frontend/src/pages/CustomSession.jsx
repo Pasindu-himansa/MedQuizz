@@ -82,11 +82,18 @@ export default function CustomSession() {
     setLoading(false);
   };
 
+  const inputClass =
+    "w-full bg-white/10 backdrop-blur-sm border border-white/25 text-white rounded-lg px-4 py-2 outline-none focus:border-white/50 placeholder-white/40";
+  const cardClass =
+    "bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl";
+
   return (
     <div className="min-h-screen p-4">
       <div className="max-w-2xl mx-auto">
         {/* Header */}
-        <div className="glass-card p-4 mb-4 flex justify-between items-center">
+        <div
+          className={`${cardClass} p-4 mb-4 flex justify-between items-center`}
+        >
           <div>
             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
               Custom Session <FilePlusCorner size={20} />
@@ -110,7 +117,7 @@ export default function CustomSession() {
         )}
 
         {/* Mode Selector */}
-        <div className="glass-card p-6 mb-4">
+        <div className={`${cardClass} p-6 mb-4`}>
           <h2 className="font-bold text-white mb-3">Question Mode</h2>
           <div className="grid grid-cols-2 gap-3">
             {[
@@ -123,7 +130,7 @@ export default function CustomSession() {
                   setMode(m.v);
                   setCurrent({ ...emptyQuestion });
                 }}
-                className={`p-4 rounded-xl border text-left transition ${
+                className={`p-4 rounded-xl border text-left transition backdrop-blur-sm ${
                   mode === m.v
                     ? "border-indigo-400/50 bg-indigo-500/30"
                     : "border-white/20 hover:border-white/40"
@@ -137,7 +144,7 @@ export default function CustomSession() {
         </div>
 
         {/* Add Question Form */}
-        <div className="glass-card p-6 mb-4">
+        <div className={`${cardClass} p-6 mb-4`}>
           <h2 className="font-bold text-white mb-4">
             Question {questions.length + 1}
           </h2>
@@ -152,7 +159,7 @@ export default function CustomSession() {
                 <textarea
                   value={current.question}
                   onChange={(e) => handleChange("question", e.target.value)}
-                  className="glass-input w-full rounded-lg px-4 py-3 resize-none"
+                  className={`${inputClass} resize-none`}
                   rows={3}
                   placeholder="Type the question here..."
                 />
@@ -168,7 +175,7 @@ export default function CustomSession() {
                     onChange={(e) =>
                       handleChange(`option_${opt}`, e.target.value)
                     }
-                    className="glass-input w-full rounded-lg px-4 py-2"
+                    className={inputClass}
                     placeholder={`Option ${opt.toUpperCase()}...`}
                   />
                 </div>
@@ -190,7 +197,7 @@ export default function CustomSession() {
                 <textarea
                   value={current.stem}
                   onChange={(e) => handleChange("stem", e.target.value)}
-                  className="glass-input w-full rounded-lg px-4 py-3 resize-none"
+                  className={`${inputClass} resize-none`}
                   rows={2}
                   placeholder="Type your question here..."
                 />
@@ -206,7 +213,7 @@ export default function CustomSession() {
                     onChange={(e) =>
                       handleChange(`statement_${opt}`, e.target.value)
                     }
-                    className="glass-input w-full rounded-lg px-4 py-2"
+                    className={inputClass}
                     placeholder={`Statement ${opt.toUpperCase()}...`}
                   />
                 </div>
@@ -220,7 +227,7 @@ export default function CustomSession() {
 
           <button
             onClick={handleAddQuestion}
-            className="glass-btn w-full text-white py-3 rounded-xl font-semibold mt-4"
+            className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-xl font-semibold mt-4 hover:bg-indigo-500/90 transition"
           >
             + Add Question
           </button>
@@ -228,7 +235,7 @@ export default function CustomSession() {
 
         {/* Added Questions */}
         {questions.length > 0 && (
-          <div className="glass-card p-6 mb-4">
+          <div className={`${cardClass} p-6 mb-4`}>
             <h2 className="font-bold text-white mb-3">
               Added Questions ({questions.length})
             </h2>
@@ -268,7 +275,7 @@ export default function CustomSession() {
           <button
             onClick={handleStartSession}
             disabled={loading}
-            className="glass-btn-green w-full text-white py-4 rounded-2xl font-bold text-lg disabled:opacity-50 mb-8"
+            className="w-full bg-green-600/70 backdrop-blur-sm border border-white/20 text-white py-4 rounded-2xl font-bold text-lg disabled:opacity-50 mb-8 hover:bg-green-600/90 transition"
           >
             {loading
               ? "Creating session..."
