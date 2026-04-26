@@ -31,6 +31,7 @@ export default function Session() {
   const [tfCorrect, setTfCorrect] = useState(null);
   const wsRef = useRef(null);
   const navigate = useNavigate();
+  const [sessionStarted, setSessionStarted] = useState(false);
 
   useEffect(() => {
     loadQuestion();
@@ -81,6 +82,8 @@ export default function Session() {
     };
   };
 
+  const [sessionStarted, setSessionStarted] = useState(false);
+
   const loadQuestion = async () => {
     try {
       const res = await API.get(`/session/${roomCode}/question`);
@@ -89,9 +92,16 @@ export default function Session() {
         return;
       }
       if (res.data.status === "finished") {
+        if (!sessionStarted) {
+          // Session just created, questions not ready yet
+          setTimeout(loadQuestion, 2000);
+          return;
+        }
         setFinished(true);
         return;
       }
+      // Real question received
+      setSessionStarted(true);
       setQuestion(res.data);
       setMode(res.data.mode || "sba");
       const joinRes = await API.post(`/session/join/${roomCode}`);
