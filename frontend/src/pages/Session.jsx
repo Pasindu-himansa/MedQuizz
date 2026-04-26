@@ -82,8 +82,6 @@ export default function Session() {
     };
   };
 
-  const [sessionStarted, setSessionStarted] = useState(false);
-
   const loadQuestion = async () => {
     try {
       const res = await API.get(`/session/${roomCode}/question`);
