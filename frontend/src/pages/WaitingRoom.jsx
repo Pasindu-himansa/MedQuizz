@@ -26,11 +26,11 @@ export default function WaitingRoom() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="glass-card p-8 w-full max-w-md">
+      <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-white">Waiting Room</h1>
           <p className="text-white/50 mt-1">Share this code with Students</p>
-          <div className="mt-4 bg-white/10 rounded-xl p-4 border border-white/20">
+          <div className="mt-4 bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
             <p className="text-5xl font-bold tracking-widest text-white">
               {roomCode}
             </p>
@@ -45,7 +45,7 @@ export default function WaitingRoom() {
             {players.map((player, i) => (
               <div
                 key={i}
-                className="flex items-center gap-3 bg-white/10 rounded-lg px-4 py-3 border border-white/10"
+                className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg px-4 py-3 border border-white/10"
               >
                 <div className="w-8 h-8 bg-indigo-500/50 rounded-full flex items-center justify-center text-white font-bold border border-indigo-400/30">
                   {player.name[0].toUpperCase()}
@@ -64,13 +64,14 @@ export default function WaitingRoom() {
         {isHost ? (
           <button
             onClick={() => navigate(`/session/${roomCode}`)}
-            className="glass-btn w-full text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2"
+            className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-indigo-500/90 transition"
           >
-            Start Session <Power />
+            Start Session <Power size={18} />
           </button>
         ) : (
-          <div className="text-center text-white/50 py-3">
-            <LoaderCircle /> Waiting for host to start...
+          <div className="text-center text-white/50 py-3 flex items-center justify-center gap-2">
+            <LoaderCircle className="animate-spin" size={18} /> Waiting for host
+            to start...
           </div>
         )}
       </div>
