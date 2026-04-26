@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import API from "../api";
 import { LoaderCircle, Power } from "lucide-react";
@@ -7,6 +7,7 @@ export default function WaitingRoom() {
   const { roomCode } = useParams();
   const [players, setPlayers] = useState([]);
   const [isHost, setIsHost] = useState(false);
+  const isHostRef = useRef(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -14,15 +15,19 @@ export default function WaitingRoom() {
       try {
         const res = await API.post(`/session/join/${roomCode}`);
         setPlayers(res.data.players);
-        setIsHost(res.data.host_id === res.data.your_id);
+        const hostStatus = res.data.host_id === res.data.your_id;
+        setIsHost(hostStatus);
+        isHostRef.current = hostStatus;
 
-        // Check if session has started
-        const questionRes = await API.get(`/session/${roomCode}/question`);
-        if (
-          questionRes.data.status === "active" ||
-          questionRes.data.status === "generating"
-        ) {
-          navigate(`/session/${roomCode}`);
+        // Only redirect non-host players when session starts
+        if (!isHostRef.current) {
+          const questionRes = await API.get(`/session/${roomCode}/question`);
+          if (
+            questionRes.data.status === "active" ||
+            questionRes.data.status === "generating"
+          ) {
+            navigate(`/session/${roomCode}`);
+          }
         }
       } catch (err) {
         console.error(err);
