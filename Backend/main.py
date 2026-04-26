@@ -203,6 +203,45 @@ def create_session(
         "difficulty": req.difficulty,
         "num_questions": req.num_questions
     }
+@app.get("/session/{room_code}/status")
+def get_session_status(
+    room_code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    session = db.query(GameSession).filter(
+        GameSession.room_code == room_code
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return {
+        "status": session.status,
+        "current_question": session.current_question
+    }
+
+@app.post("/session/{room_code}/start")
+async def start_session(
+    room_code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    session = db.query(GameSession).filter(
+        GameSession.room_code == room_code
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.host_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only host can start")
+
+    session.status = "active"
+    db.commit()
+
+    await manager.broadcast(room_code, {"type": "session_started"})
+
+    return {"status": "started"}
 
 @app.post("/session/custom")
 def create_custom_session(

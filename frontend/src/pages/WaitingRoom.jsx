@@ -19,13 +19,10 @@ export default function WaitingRoom() {
         setIsHost(hostStatus);
         isHostRef.current = hostStatus;
 
-        // Only redirect non-host players when session starts
+        // Check session status for non-host players
         if (!isHostRef.current) {
-          const questionRes = await API.get(`/session/${roomCode}/question`);
-          if (
-            questionRes.data.status === "active" ||
-            questionRes.data.status === "generating"
-          ) {
+          const statusRes = await API.get(`/session/${roomCode}/status`);
+          if (statusRes.data.status === "active") {
             navigate(`/session/${roomCode}`);
           }
         }
@@ -34,9 +31,18 @@ export default function WaitingRoom() {
       }
     };
     fetchSession();
-    const interval = setInterval(fetchSession, 3000);
+    const interval = setInterval(fetchSession, 2000);
     return () => clearInterval(interval);
   }, [roomCode]);
+
+  const handleStart = async () => {
+    try {
+      await API.post(`/session/${roomCode}/start`);
+      navigate(`/session/${roomCode}`);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
@@ -77,7 +83,7 @@ export default function WaitingRoom() {
 
         {isHost ? (
           <button
-            onClick={() => navigate(`/session/${roomCode}`)}
+            onClick={handleStart}
             className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-indigo-500/90 transition"
           >
             Start Session <Power size={18} />
