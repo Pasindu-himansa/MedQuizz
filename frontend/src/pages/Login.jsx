@@ -27,7 +27,7 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="glass-card p-8 w-full max-w-md">
+      <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-8 w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white">MedQuizz</h1>
@@ -46,7 +46,7 @@ export default function Login() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="glass-input w-full rounded-lg px-4 py-3"
+              className="w-full bg-white/10 backdrop-blur-sm border border-white/25 text-white rounded-lg px-4 py-3 outline-none focus:border-white/50 placeholder-white/40"
               placeholder="your@email.com"
               required
             />
@@ -60,7 +60,7 @@ export default function Login() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="glass-input w-full rounded-lg px-4 py-3"
+              className="w-full bg-white/10 backdrop-blur-sm border border-white/25 text-white rounded-lg px-4 py-3 outline-none focus:border-white/50 placeholder-white/40"
               placeholder="••••••••"
               required
             />
@@ -75,7 +75,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="glass-btn w-full text-white py-3 rounded-lg font-semibold disabled:opacity-50"
+            className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold hover:bg-indigo-500/90 transition disabled:opacity-50"
           >
             {loading ? "Logging in..." : "Login"}
           </button>
