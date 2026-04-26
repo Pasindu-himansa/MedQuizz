@@ -15,6 +15,15 @@ export default function WaitingRoom() {
         const res = await API.post(`/session/join/${roomCode}`);
         setPlayers(res.data.players);
         setIsHost(res.data.host_id === res.data.your_id);
+
+        // Check if session has started
+        const questionRes = await API.get(`/session/${roomCode}/question`);
+        if (
+          questionRes.data.status === "active" ||
+          questionRes.data.status === "generating"
+        ) {
+          navigate(`/session/${roomCode}`);
+        }
       } catch (err) {
         console.error(err);
       }
