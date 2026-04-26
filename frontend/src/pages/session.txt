@@ -3,6 +3,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import API from "../api";
 import { GiBrain } from "react-icons/gi";
 import { CircleCheck, LoaderCircle, Eye, ArrowRight } from "lucide-react";
+import { PiFlowerLotusBold } from "react-icons/pi";
+import { IoStatsChartSharp } from "react-icons/io5";
 
 export default function Session() {
   const { roomCode } = useParams();
@@ -29,6 +31,7 @@ export default function Session() {
   const [tfCorrect, setTfCorrect] = useState(null);
   const wsRef = useRef(null);
   const navigate = useNavigate();
+  const [sessionStarted, setSessionStarted] = useState(false);
 
   useEffect(() => {
     loadQuestion();
@@ -87,9 +90,16 @@ export default function Session() {
         return;
       }
       if (res.data.status === "finished") {
+        if (!sessionStarted) {
+          // Session just created, questions not ready yet
+          setTimeout(loadQuestion, 2000);
+          return;
+        }
         setFinished(true);
         return;
       }
+      // Real question received
+      setSessionStarted(true);
       setQuestion(res.data);
       setMode(res.data.mode || "sba");
       const joinRes = await API.post(`/session/join/${roomCode}`);
@@ -176,16 +186,18 @@ export default function Session() {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-8 w-full max-w-md text-center">
-          <div className="text-6xl mb-4">🎉</div>
+          <div className="text-6xl mb-4 flex items-center justify-center">
+            <PiFlowerLotusBold color="white" size={64} />
+          </div>
           <h1 className="text-2xl font-bold text-white mb-2">
             Session Complete!
           </h1>
           <p className="text-white/50 mb-6">Great studying everyone! 💪</p>
           <button
             onClick={() => navigate(`/score/${roomCode}`)}
-            className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold hover:bg-indigo-500/90 transition mb-3"
+            className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold hover:bg-indigo-500/90 transition mb-3 flex items-center justify-center gap-2"
           >
-            📊 View My Score
+            <IoStatsChartSharp size={20} /> View My Score
           </button>
           <button
             onClick={() => navigate("/dashboard")}
