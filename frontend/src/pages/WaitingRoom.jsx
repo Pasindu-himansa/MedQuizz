@@ -26,7 +26,7 @@ export default function WaitingRoom() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="glass-card p-8 w-full max-w-md">
+      <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-white">Waiting Room</h1>
           <p className="text-white/50 mt-1">Share this code with Students</p>
@@ -64,13 +64,14 @@ export default function WaitingRoom() {
         {isHost ? (
           <button
             onClick={() => navigate(`/session/${roomCode}`)}
-            className="glass-btn w-full text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2"
+            className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-indigo-500/90 transition"
           >
-            Start Session <Power />
+            Start Session <Power size={18} />
           </button>
         ) : (
-          <div className="text-center text-white/50 py-3">
-            <LoaderCircle /> Waiting for host to start...
+          <div className="text-center text-white/50 py-3 flex items-center justify-center gap-2">
+            <LoaderCircle className="animate-spin" size={18} /> Waiting for host
+            to start...
           </div>
         )}
       </div>

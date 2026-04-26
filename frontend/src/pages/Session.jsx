@@ -185,9 +185,9 @@ export default function Session() {
           <p className="text-white/50 mb-6">Great studying everyone! 💪</p>
           <button
             onClick={() => navigate(`/score/${roomCode}`)}
-            className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold hover:bg-indigo-500/90 transition mb-3"
+            className="w-full bg-indigo-500/70 backdrop-blur-sm border border-white/20 text-white py-3 rounded-lg font-semibold hover:bg-indigo-500/90 transition mb-3 flex items-center justify-center gap-2"
           >
-            <IoStatsChartSharp /> View My Score
+            <IoStatsChartSharp size={20} /> View My Score
           </button>
           <button
             onClick={() => navigate("/dashboard")}
