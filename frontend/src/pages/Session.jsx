@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import API from "../api";
-import { GiBrain, PiFlowerLotusBold, IoStatsChartSharp } from "react-icons/gi";
+import { GiBrain } from "react-icons/gi";
 import { CircleCheck, LoaderCircle, Eye, ArrowRight } from "lucide-react";
+import { PiFlowerLotusBold } from "react-icons/pi";
+import { IoStatsChartSharp } from "react-icons/io5";
 
 export default function Session() {
   const { roomCode } = useParams();
