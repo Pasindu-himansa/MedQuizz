@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import API from "../api";
-import { Brain, CircleCheck, CircleAlert } from "lucide-react";
+import { Brain, CircleCheck, CircleAlert, Clock } from "lucide-react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -11,7 +11,9 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const notice = location.state?.notice;
-  const deactivated = new URLSearchParams(location.search).has("deactivated");
+  const params = new URLSearchParams(location.search);
+  const deactivated = params.has("deactivated");
+  const expired = params.has("expired");
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -52,6 +54,12 @@ export default function Login() {
         {deactivated && !error && (
           <div className="flex items-center gap-2 bg-red-500/20 border border-red-400/30 text-red-200 px-4 py-3 rounded-lg text-sm mb-4">
             <CircleAlert size={16} /> This account has been deactivated.
+          </div>
+        )}
+
+        {expired && !error && (
+          <div className="flex items-center gap-2 bg-indigo-500/20 border border-indigo-400/30 text-indigo-100 px-4 py-3 rounded-lg text-sm mb-4">
+            <Clock size={16} /> Your session has expired. Please log in again.
           </div>
         )}
 
