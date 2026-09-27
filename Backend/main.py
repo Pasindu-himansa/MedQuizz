@@ -258,8 +258,10 @@ _otp_requests_by_ip: Dict[str, deque] = {}
 _otp_emails_sent = {"day": None, "count": 0}
 
 def client_ip(request: Request) -> str:
+    # Hugging Face's proxy appends the real client IP as the LAST x-forwarded-for entry;
+    # earlier entries come from the client and can be faked.
     forwarded = request.headers.get("x-forwarded-for", "")
-    return forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+    return forwarded.split(",")[-1].strip() if forwarded else (request.client.host if request.client else "unknown")
 
 def check_otp_ip_limit(request: Request):
     now = time.time()
