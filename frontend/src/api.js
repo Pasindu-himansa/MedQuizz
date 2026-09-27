@@ -12,4 +12,20 @@ API.interceptors.request.use((config) => {
   return config;
 });
 
+// A deactivated account is logged out everywhere as soon as it makes a request
+API.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (
+      err.response?.status === 403 &&
+      err.response.data?.detail === "This account has been deactivated" &&
+      localStorage.getItem("token")
+    ) {
+      localStorage.clear();
+      window.location.href = "/login?deactivated=1";
+    }
+    return Promise.reject(err);
+  },
+);
+
 export default API;

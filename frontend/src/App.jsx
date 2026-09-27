@@ -8,6 +8,7 @@ import CustomSession from "./pages/CustomSession";
 import ScorePage from "./pages/ScorePage";
 import ForgotPassword from "./pages/ForgotPassword";
 import Account from "./pages/Account";
+import Admin from "./pages/Admin";
 
 function PrivateRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -22,6 +23,14 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route
+          path="/admin"
+          element={
+            <PrivateRoute>
+              <Admin />
+            </PrivateRoute>
+          }
+        />
         <Route
           path="/account"
           element={

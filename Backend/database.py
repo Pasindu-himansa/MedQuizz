@@ -99,6 +99,29 @@ class SessionResult(Base):
     percentage = Column(Float)
     created_at = Column(DateTime, server_default=func.now())
 
+class AIUsage(Base):
+    __tablename__ = "ai_usage"
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, index=True)
+    feature = Column(String)  # e.g. question_sba, explain_tf
+    model = Column(String)
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    success = Column(Boolean, default=True)
+    error = Column(String, nullable=True)
+    # Groq rate-limit headers at the time of the call (requests are per day, tokens per minute)
+    limit_requests = Column(Integer, nullable=True)
+    remaining_requests = Column(Integer, nullable=True)
+    limit_tokens = Column(Integer, nullable=True)
+    remaining_tokens = Column(Integer, nullable=True)
+
+class DeactivatedUser(Base):
+    __tablename__ = "deactivated_users"
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    deactivated_at = Column(DateTime)
+    deactivated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
 def get_db():
     db = SessionLocal()
     try:

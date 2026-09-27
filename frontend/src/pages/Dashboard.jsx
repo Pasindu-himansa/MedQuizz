@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../api";
 import {
@@ -7,6 +7,7 @@ import {
   FilePlusCorner,
   CircleUserRound,
   LogOut,
+  ShieldCheck,
 } from "lucide-react";
 import { GiHealthNormal } from "react-icons/gi";
 
@@ -18,8 +19,15 @@ export default function Dashboard() {
   const [mode, setMode] = useState("sba");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
   const name = localStorage.getItem("name");
+
+  useEffect(() => {
+    API.get("/me")
+      .then((res) => setIsAdmin(res.data.is_admin))
+      .catch(() => {});
+  }, []);
 
   const subjects = [
     "General Medicine",
@@ -99,6 +107,14 @@ export default function Dashboard() {
             <p className="text-white/60 text-sm">Welcome, {name}!</p>
           </div>
           <div className="flex items-center gap-4">
+            {isAdmin && (
+              <button
+                onClick={() => navigate("/admin")}
+                className="flex items-center gap-1 text-indigo-300 hover:text-indigo-200 text-sm font-medium transition"
+              >
+                <ShieldCheck size={18} /> Admin
+              </button>
+            )}
             <button
               onClick={() => navigate("/account")}
               className="flex items-center gap-1 text-white/60 hover:text-white text-sm font-medium transition"

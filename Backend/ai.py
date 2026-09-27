@@ -1,4 +1,6 @@
+import groq
 from groq import Groq
+from datetime import datetime
 import re
 import json
 import os
@@ -15,6 +17,63 @@ GROQ_MODEL = "openai/gpt-oss-120b"
 
 
 
+# ── Groq call + usage tracking ────────────────────────
+def _header_int(headers, name):
+    try:
+        return int(float(headers.get(name)))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _record_usage(feature: str, usage=None, headers=None, error: str = None):
+    """Log every Groq call (tokens + rate-limit headers) for the admin usage meter."""
+    try:
+        from database import SessionLocal, AIUsage
+        h = headers or {}
+        db = SessionLocal()
+        try:
+            db.add(AIUsage(
+                created_at=datetime.utcnow(),
+                feature=feature,
+                model=GROQ_MODEL,
+                prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+                total_tokens=getattr(usage, "total_tokens", 0) or 0,
+                success=error is None,
+                error=error,
+                limit_requests=_header_int(h, "x-ratelimit-limit-requests"),
+                remaining_requests=_header_int(h, "x-ratelimit-remaining-requests"),
+                limit_tokens=_header_int(h, "x-ratelimit-limit-tokens"),
+                remaining_tokens=_header_int(h, "x-ratelimit-remaining-tokens"),
+            ))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"Usage logging error: {e}")
+
+
+def _chat(feature: str, messages: list, temperature: float, max_tokens: int) -> str:
+    client = Groq(api_key=GROQ_API_KEY)
+    try:
+        raw = client.chat.completions.with_raw_response.create(
+            model=GROQ_MODEL,
+            reasoning_effort="low",
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+    except groq.APIStatusError as e:
+        _record_usage(feature, headers=e.response.headers, error=f"HTTP {e.status_code}")
+        raise
+    except Exception as e:
+        _record_usage(feature, error=type(e).__name__)
+        raise
+    response = raw.parse()
+    _record_usage(feature, response.usage, raw.headers)
+    return (response.choices[0].message.content or "").strip()
+
+
 # ── Helpers: call Groq with retries & parse JSON robustly ──
 def _extract_json(text: str):
     text = re.sub(r"```(?:json)?", "", text)
@@ -27,21 +86,14 @@ def _extract_json(text: str):
         return None
 
 
-def _generate_json(prompt: str, max_tokens: int, attempts: int = 3):
-    client = Groq(api_key=GROQ_API_KEY)
+def _generate_json(feature: str, prompt: str, max_tokens: int, attempts: int = 3):
     for attempt in range(attempts):
         try:
-            response = client.chat.completions.create(
-                model=GROQ_MODEL,
-                reasoning_effort="low",
-                messages=[
-                    {"role": "system", "content": "You are a medical exam question generator. Always return valid JSON only. No other text."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=max_tokens
-            )
-            data = _extract_json(response.choices[0].message.content.strip())
+            text = _chat(feature, [
+                {"role": "system", "content": "You are a medical exam question generator. Always return valid JSON only. No other text."},
+                {"role": "user", "content": prompt}
+            ], temperature=0.8, max_tokens=max_tokens)
+            data = _extract_json(text)
             if data:
                 return data
             print(f"Attempt {attempt+1}: no valid JSON in Groq response")
@@ -108,7 +160,7 @@ Return ONLY a JSON object in this exact format with no other text:
 
 Make the question clinically accurate and challenging for {level}."""
 
-    q_data = _generate_json(prompt, 600)
+    q_data = _generate_json("question_sba", prompt, 600)
     if q_data and q_data.get("question"):
         return {
             "id": index + 1,
@@ -178,7 +230,7 @@ Return ONLY a JSON object in this exact format with no other text:
 
 Make statements clinically accurate and challenging for {level}."""
 
-    q_data = _generate_json(prompt, 800)
+    q_data = _generate_json("question_tf", prompt, 800)
     if q_data and q_data.get("stem"):
         return {
             "id": index + 1,
@@ -253,12 +305,7 @@ For each statement explain:
 Also add a clinical pearl at the end."""
 
     try:
-        client = Groq(api_key=GROQ_API_KEY)
-
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            reasoning_effort="low",
-            messages=[
+        text = _chat("explain_tf", [
                 {
                     "role": "system",
                     "content": "You are an expert medical educator helping final year MBBS students in Sri Lanka prepare for exams."
@@ -267,12 +314,9 @@ Also add a clinical pearl at the end."""
                     "role": "user",
                     "content": prompt
                 }
-            ],
-            temperature=0.5,
-            max_tokens=1000
-        )
+            ], temperature=0.5, max_tokens=1000)
 
-        return response.choices[0].message.content.strip()
+        return text
 
     except Exception as e:
         print(f"Groq T/F explanation error: {e}")
@@ -293,18 +337,11 @@ E) {options['e']}
 Reply with ONLY a single letter: a, b, c, d, or e"""
 
     try:
-        client = Groq(api_key=GROQ_API_KEY)
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            reasoning_effort="low",
-            messages=[
+        text = _chat("answer_sba", [
                 {"role": "system", "content": "You are a medical expert. Reply with only a single letter."},
                 {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=300
-        )
-        answer = response.choices[0].message.content.strip().lower()
+            ], temperature=0.1, max_tokens=300)
+        answer = text.lower()
         if answer in ['a','b','c','d','e']:
             return answer
     except Exception as e:
@@ -323,18 +360,11 @@ Is this statement TRUE or FALSE medically?
 Reply with ONLY the word: true or false"""
 
     try:
-        client = Groq(api_key=GROQ_API_KEY)
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            reasoning_effort="low",
-            messages=[
+        text = _chat("answer_tf", [
                 {"role": "system", "content": "You are a medical expert. Reply with only true or false."},
                 {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=300
-        )
-        answer = response.choices[0].message.content.strip().lower()
+            ], temperature=0.1, max_tokens=300)
+        answer = text.lower()
         return answer == 'true'
     except Exception as e:
         print(f"AI T/F answer error: {e}")
@@ -375,12 +405,7 @@ Please explain:
 5. 📚 What to read more about"""
 
     try:
-        client = Groq(api_key=GROQ_API_KEY)
-
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            reasoning_effort="low",
-            messages=[
+        text = _chat("explain_sba", [
                 {
                     "role": "system",
                     "content": "You are an expert medical educator helping final year MBBS students in Sri Lanka prepare for exams. Give clear, detailed, clinically accurate explanations."
@@ -389,12 +414,9 @@ Please explain:
                     "role": "user",
                     "content": prompt
                 }
-            ],
-            temperature=0.5,
-            max_tokens=800
-        )
+            ], temperature=0.5, max_tokens=800)
 
-        return response.choices[0].message.content.strip()
+        return text
 
     except Exception as e:
         print(f"Groq explanation error: {e}")

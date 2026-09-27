@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../api";
+import ColumnChart from "../components/ColumnChart";
 import {
   ArrowLeft,
   CircleUserRound,
@@ -54,92 +55,33 @@ function StatTile({ label, value }) {
 }
 
 function ScoreChart({ results }) {
-  const [hovered, setHovered] = useState(null);
-  const data = results.slice(-CHART_SESSIONS);
-  const last = data.length - 1;
-
+  const data = results
+    .slice(-CHART_SESSIONS)
+    .map((r) => ({ ...r, value: r.percentage }));
   return (
-    <div className="flex gap-2">
-      {/* Y axis labels */}
-      <div className="relative w-9 h-48 flex-shrink-0 text-xs text-white/40">
-        {[100, 50, 0].map((t) => (
-          <span
-            key={t}
-            className="absolute right-0 -translate-y-1/2"
-            style={{ top: `${100 - t}%` }}
-          >
-            {t}%
-          </span>
-        ))}
-      </div>
-
-      {/* Plot */}
-      <div className="relative flex-1 h-48">
-        {[100, 50, 0].map((t) => (
-          <div
-            key={t}
-            className="absolute left-0 right-0 h-px bg-white/10"
-            style={{ top: `${100 - t}%` }}
-          />
-        ))}
-
-        <div className="absolute inset-0 flex items-end">
-          {data.map((r, i) => {
-            const active = hovered === i;
-            return (
-              <button
-                key={i}
-                type="button"
-                onMouseEnter={() => setHovered(i)}
-                onMouseLeave={() => setHovered(null)}
-                onFocus={() => setHovered(i)}
-                onBlur={() => setHovered(null)}
-                aria-label={`${r.subject}, ${formatDate(r.date)}: ${r.earned} of ${r.total}, ${Math.round(r.percentage)}%`}
-                className="relative flex-1 h-full flex items-end justify-center outline-none focus-visible:bg-white/5"
-              >
-                <div
-                  className="w-full mx-px rounded-t"
-                  style={{
-                    maxWidth: 24,
-                    height: r.percentage > 0 ? `${r.percentage}%` : 2,
-                    background: active ? BAR_HOVER_COLOR : BAR_COLOR,
-                    opacity: r.percentage > 0 ? 1 : 0.5,
-                  }}
-                />
-                {i === last && hovered === null && (
-                  <span
-                    className="absolute text-xs font-semibold text-white"
-                    style={{ bottom: `calc(${r.percentage}% + 4px)` }}
-                  >
-                    {Math.round(r.percentage)}%
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {hovered !== null && (
-          <div
-            className="absolute z-10 -translate-x-1/2 pointer-events-none bg-gray-900/95 border border-white/20 rounded-lg px-3 py-2 text-xs text-white shadow-xl whitespace-nowrap"
-            style={{
-              left: `${((hovered + 0.5) / data.length) * 100}%`,
-              bottom: `calc(${Math.max(data[hovered].percentage, 0)}% + 8px)`,
-            }}
-          >
-            <div className="font-semibold">{data[hovered].subject}</div>
-            <div className="text-white/60">
-              {formatDate(data[hovered].date)} ·{" "}
-              {modeLabel(data[hovered].mode)}
-            </div>
-            <div className="mt-1">
-              {data[hovered].earned}/{data[hovered].total} ·{" "}
-              <strong>{Math.round(data[hovered].percentage)}%</strong>
-            </div>
+    <ColumnChart
+      data={data}
+      max={100}
+      ticks={[100, 50, 0]}
+      formatTick={(t) => `${t}%`}
+      color={BAR_COLOR}
+      hoverColor={BAR_HOVER_COLOR}
+      capLabel={(d) => `${Math.round(d.value)}%`}
+      ariaLabel={(d) =>
+        `${d.subject}, ${formatDate(d.date)}: ${d.earned} of ${d.total}, ${Math.round(d.value)}%`
+      }
+      renderTooltip={(d) => (
+        <>
+          <div className="font-semibold">{d.subject}</div>
+          <div className="text-white/60">
+            {formatDate(d.date)} · {modeLabel(d.mode)}
           </div>
-        )}
-      </div>
-    </div>
+          <div className="mt-1">
+            {d.earned}/{d.total} · <strong>{Math.round(d.value)}%</strong>
+          </div>
+        </>
+      )}
+    />
   );
 }
 

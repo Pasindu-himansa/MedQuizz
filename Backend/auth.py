@@ -3,12 +3,17 @@ from jose import JWTError, jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-from database import get_db, User
+from database import get_db, User, DeactivatedUser
 import hashlib
 import hmac
 import os
+import secrets
 
-SECRET_KEY = "medquizz-secret-key-2024"
+# Signing key for login tokens - must be secret (set JWT_SECRET on the Space).
+# Without it a random key is used, so tokens stop working whenever the server restarts.
+SECRET_KEY = os.environ.get("JWT_SECRET") or secrets.token_urlsafe(48)
+if not os.environ.get("JWT_SECRET"):
+    print("WARNING: JWT_SECRET is not set - using a temporary random key; users will be logged out on restart")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 7
 
@@ -47,4 +52,6 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
+    if db.query(DeactivatedUser).filter(DeactivatedUser.user_id == user.id).first():
+        raise HTTPException(status_code=403, detail="This account has been deactivated")
     return user

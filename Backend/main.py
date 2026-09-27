@@ -15,11 +15,11 @@ import hmac
 import re
 from ai import load_model, explain_question, generate_single_question, generate_tf_question, explain_tf_question
 
-from database import get_db, create_tables, User, Question, Session as GameSession, SessionPlayer, Answer, SavedSession, EmailOTP, SessionResult
+from database import get_db, create_tables, User, Question, Session as GameSession, SessionPlayer, Answer, SavedSession, EmailOTP, SessionResult, AIUsage, DeactivatedUser
 from mailer import send_otp_email
 from auth import hash_password, verify_password, create_token, get_current_user
 
-from ai import load_model, explain_question, generate_single_question, generate_tf_question, explain_tf_question, get_ai_answer, get_ai_tf_answer
+from ai import load_model, explain_question, generate_single_question, generate_tf_question, explain_tf_question, get_ai_answer, get_ai_tf_answer, GROQ_MODEL
 
 app = FastAPI(title="MedQuizz API")
 
@@ -200,7 +200,7 @@ async def startup():
 OTP_MINUTES_VALID = 10
 OTP_RESEND_SECONDS = 60
 OTP_MAX_ATTEMPTS = 5
-OTP_PEPPER = os.environ.get("OTP_PEPPER", "medquizz-otp")
+OTP_PEPPER = os.environ.get("OTP_PEPPER") or os.environ.get("JWT_SECRET", "medquizz-otp")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 def normalize_email(email: str) -> str:
@@ -215,6 +215,19 @@ def check_password_strength(password: str):
 
 def find_user_by_email(db: Session, email: str):
     return db.query(User).filter(func.lower(User.email) == email).first()
+
+def is_deactivated(db: Session, user_id: int) -> bool:
+    return db.query(DeactivatedUser).filter(DeactivatedUser.user_id == user_id).first() is not None
+
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
+
+def is_admin(user: User) -> bool:
+    return (user.email or "").lower() in ADMIN_EMAILS
+
+def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    if not is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Admin access only")
+    return current_user
 
 def hash_otp(email: str, purpose: str, code: str) -> str:
     return hashlib.sha256(f"{email}:{purpose}:{code}:{OTP_PEPPER}".encode()).hexdigest()
@@ -277,7 +290,8 @@ def request_register_otp(req: OTPRequest, db: Session = Depends(get_db)):
 def request_reset_otp(req: OTPRequest, db: Session = Depends(get_db)):
     email = normalize_email(req.email)
     # Same response whether or not the account exists, so emails can't be probed
-    if find_user_by_email(db, email):
+    user = find_user_by_email(db, email)
+    if user and not is_deactivated(db, user.id):
         issue_otp(db, email, "reset")
     return {"status": "sent"}
 
@@ -321,6 +335,8 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = find_user_by_email(db, (req.email or "").strip().lower())
     if not user or not verify_password(req.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if is_deactivated(db, user.id):
+        raise HTTPException(status_code=403, detail="This account has been deactivated")
 
     token = create_token({"sub": user.email})
     return {"token": token, "name": user.name}
@@ -1074,7 +1090,7 @@ def calculate_score(room_code: str, session: GameSession, user_id: int, db: Sess
 
 # ── My Account ────────────────────────────────────────
 def user_to_dict(user: User) -> dict:
-    return {"id": user.id, "name": user.name, "email": user.email, "university": user.university}
+    return {"id": user.id, "name": user.name, "email": user.email, "university": user.university, "is_admin": is_admin(user)}
 
 @app.get("/me")
 def get_me(current_user: User = Depends(get_current_user)):
@@ -1155,6 +1171,170 @@ def get_progress(
             "percentage": r.percentage,
             "date": iso_utc(r.created_at)
         } for r in results]
+    }
+
+# ── Admin ─────────────────────────────────────────────
+GROQ_DAILY_TOKEN_LIMIT = int(os.environ.get("GROQ_DAILY_TOKEN_LIMIT", "200000"))  # free tier TPD for gpt-oss-120b
+
+@app.get("/admin/users")
+def admin_list_users(
+    search: str = "",
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    deactivated = {d.user_id: d for d in db.query(DeactivatedUser).all()}
+    total_users = db.query(User).count()
+
+    query = db.query(User)
+    term = search.strip().lower()
+    if term:
+        like = f"%{term}%"
+        query = query.filter(
+            func.lower(User.name).like(like) | func.lower(User.email).like(like) | func.lower(User.university).like(like)
+        )
+    users = query.order_by(User.id.desc()).all()
+
+    joined = dict(db.query(SessionPlayer.user_id, func.count(SessionPlayer.id)).group_by(SessionPlayer.user_id).all())
+    hosted = dict(db.query(GameSession.host_id, func.count(GameSession.id)).group_by(GameSession.host_id).all())
+    saved = dict(db.query(SavedSession.user_id, func.count(SavedSession.id)).group_by(SavedSession.user_id).all())
+    results = {
+        uid: (count, earned or 0, total or 0)
+        for uid, count, earned, total in db.query(
+            SessionResult.user_id, func.count(SessionResult.id), func.sum(SessionResult.earned), func.sum(SessionResult.total)
+        ).group_by(SessionResult.user_id).all()
+    }
+
+    rows = []
+    for u in users:
+        completed, earned, total = results.get(u.id, (0, 0, 0))
+        d = deactivated.get(u.id)
+        rows.append({
+            **user_to_dict(u),
+            "active": d is None,
+            "deactivated_at": iso_utc(d.deactivated_at) if d else None,
+            "sessions_joined": joined.get(u.id, 0),
+            "sessions_hosted": hosted.get(u.id, 0),
+            "sessions_completed": completed,
+            "overall_percentage": round(earned / total * 100, 1) if total else None,
+            "saved_sessions": saved.get(u.id, 0),
+        })
+
+    return {
+        "summary": {
+            "total": total_users,
+            "deactivated": len(deactivated),
+            "active": total_users - len(deactivated),
+        },
+        "users": rows
+    }
+
+@app.post("/admin/users/{user_id}/deactivate")
+def admin_deactivate_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if is_admin(user):
+        raise HTTPException(status_code=400, detail="Admin accounts can't be deactivated")
+    if not is_deactivated(db, user.id):
+        db.add(DeactivatedUser(user_id=user.id, deactivated_at=datetime.utcnow(), deactivated_by=admin.id))
+        db.commit()
+    return {"status": "deactivated"}
+
+@app.post("/admin/users/{user_id}/activate")
+def admin_activate_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    db.query(DeactivatedUser).filter(DeactivatedUser.user_id == user_id).delete()
+    db.commit()
+    return {"status": "active"}
+
+@app.get("/admin/saved-sessions")
+def admin_list_saved_sessions(
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    rows = db.query(SavedSession, User).outerjoin(User, User.id == SavedSession.user_id).order_by(
+        SavedSession.updated_at.desc(), SavedSession.id.desc()
+    ).all()
+    return [{
+        **{k: v for k, v in saved_session_to_dict(saved).items() if k != "questions"},
+        "owner": {"id": owner.id, "name": owner.name, "email": owner.email} if owner else None
+    } for saved, owner in rows]
+
+@app.delete("/admin/saved-sessions/{saved_id}")
+def admin_delete_saved_session(
+    saved_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    saved = db.query(SavedSession).filter(SavedSession.id == saved_id).first()
+    if not saved:
+        raise HTTPException(status_code=404, detail="Saved session not found")
+    db.delete(saved)
+    db.commit()
+    return {"status": "deleted"}
+
+@app.get("/admin/usage")
+def admin_usage(
+    days: int = 14,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    days = max(1, min(days, 90))
+    now = datetime.utcnow()
+    today_start = datetime(now.year, now.month, now.day)
+    window_start = today_start - timedelta(days=days - 1)
+
+    rows = db.query(
+        AIUsage.created_at, AIUsage.feature, AIUsage.total_tokens, AIUsage.success
+    ).filter(AIUsage.created_at >= window_start).all()
+
+    per_day = {(window_start + timedelta(days=i)).date().isoformat(): {"tokens": 0, "calls": 0, "errors": 0} for i in range(days)}
+    by_feature = {}
+    today = {"tokens": 0, "calls": 0, "errors": 0}
+    for created_at, feature, tokens, success in rows:
+        day = per_day.get(created_at.date().isoformat())
+        if day is None:
+            continue
+        day["calls"] += 1
+        day["tokens"] += tokens or 0
+        if not success:
+            day["errors"] += 1
+        if created_at >= today_start:
+            today["calls"] += 1
+            today["tokens"] += tokens or 0
+            if not success:
+                today["errors"] += 1
+            f = by_feature.setdefault(feature, {"feature": feature, "tokens": 0, "calls": 0, "errors": 0})
+            f["calls"] += 1
+            f["tokens"] += tokens or 0
+            if not success:
+                f["errors"] += 1
+
+    latest = db.query(AIUsage).filter(AIUsage.remaining_requests.isnot(None)).order_by(AIUsage.id.desc()).first()
+    all_time = db.query(func.coalesce(func.sum(AIUsage.total_tokens), 0), func.count(AIUsage.id)).one()
+
+    return {
+        "model": GROQ_MODEL,
+        "daily_token_limit": GROQ_DAILY_TOKEN_LIMIT,
+        "today": {**today, "remaining": max(GROQ_DAILY_TOKEN_LIMIT - today["tokens"], 0)},
+        "resets_at": iso_utc(today_start + timedelta(days=1)),
+        "groq_limits": {
+            "requests_limit_per_day": latest.limit_requests,
+            "requests_remaining_today": latest.remaining_requests,
+            "tokens_limit_per_minute": latest.limit_tokens,
+            "tokens_remaining_this_minute": latest.remaining_tokens,
+            "as_of": iso_utc(latest.created_at),
+        } if latest else None,
+        "by_feature": sorted(by_feature.values(), key=lambda f: f["tokens"], reverse=True),
+        "daily": [{"date": d, **v} for d, v in per_day.items()],
+        "all_time": {"tokens": all_time[0], "calls": all_time[1]},
     }
 
 # ── WebSocket ─────────────────────────────────────────
