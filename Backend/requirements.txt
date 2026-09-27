@@ -8,3 +8,4 @@ groq
 pydantic
 websockets
 python-dotenv
+psycopg2-binary
