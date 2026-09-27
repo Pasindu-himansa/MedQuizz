@@ -2,12 +2,54 @@ from groq import Groq
 import re
 import json
 import os
+import time
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 # ── Groq API Key ──────────────────────────────────────
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 
+
+
+# ── Helpers: call Groq with retries & parse JSON robustly ──
+def _extract_json(text: str):
+    text = re.sub(r"```(?:json)?", "", text)
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        return json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
+def _generate_json(prompt: str, max_tokens: int, attempts: int = 3):
+    client = Groq(api_key=GROQ_API_KEY)
+    for attempt in range(attempts):
+        try:
+            response = client.chat.completions.create(
+                model=GROQ_MODEL,
+                reasoning_effort="low",
+                messages=[
+                    {"role": "system", "content": "You are a medical exam question generator. Always return valid JSON only. No other text."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.8,
+                max_tokens=max_tokens
+            )
+            data = _extract_json(response.choices[0].message.content.strip())
+            if data:
+                return data
+            print(f"Attempt {attempt+1}: no valid JSON in Groq response")
+        except Exception as e:
+            print(f"Attempt {attempt+1}: Groq error: {e}")
+        if attempt < attempts - 1:
+            time.sleep(1.5 * (attempt + 1))
+    return None
 
 
 # ── Dummy load function ───────────────────────────────
@@ -66,48 +108,20 @@ Return ONLY a JSON object in this exact format with no other text:
 
 Make the question clinically accurate and challenging for {level}."""
 
-    try:
-        client = Groq(api_key=GROQ_API_KEY)
-
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a medical exam question generator. Always return valid JSON only. No other text."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=0.8,
-            max_tokens=600
-        )
-
-        text = response.choices[0].message.content.strip()
-        print(f"Groq generated question {index+1}: {text[:80]}...")
-
-        json_match = re.search(r'\{.*?\}', text, re.DOTALL)
-        if json_match:
-            q_data = json.loads(json_match.group())
-            return {
-                "id": index + 1,
-                "question": q_data.get("question", ""),
-                "option_a": q_data.get("option_a", ""),
-                "option_b": q_data.get("option_b", ""),
-                "option_c": q_data.get("option_c", ""),
-                "option_d": q_data.get("option_d", ""),
-                "option_e": q_data.get("option_e", ""),
-                "correct_answer": q_data.get("correct_answer", "a").lower(),
-                "subject": subject,
-                "explanation": q_data.get("explanation", "")
-            }
-        else:
-            print("No JSON found in Groq response")
-
-    except Exception as e:
-        print(f"Groq question generation error: {e}")
+    q_data = _generate_json(prompt, 600)
+    if q_data and q_data.get("question"):
+        return {
+            "id": index + 1,
+            "question": q_data.get("question", ""),
+            "option_a": q_data.get("option_a", ""),
+            "option_b": q_data.get("option_b", ""),
+            "option_c": q_data.get("option_c", ""),
+            "option_d": q_data.get("option_d", ""),
+            "option_e": q_data.get("option_e", ""),
+            "correct_answer": str(q_data.get("correct_answer", "a")).strip().lower()[:1],
+            "subject": subject,
+            "explanation": q_data.get("explanation", "")
+        }
 
     return _fallback_question(subject, index)
 
@@ -164,55 +178,29 @@ Return ONLY a JSON object in this exact format with no other text:
 
 Make statements clinically accurate and challenging for {level}."""
 
-    try:
-        client = Groq(api_key=GROQ_API_KEY)
-
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a medical exam question generator. Always return valid JSON only. No other text."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=0.8,
-            max_tokens=800
-        )
-
-        text = response.choices[0].message.content.strip()
-        print(f"Groq generated T/F question {index+1}: {text[:80]}...")
-
-        json_match = re.search(r'\{.*?\}', text, re.DOTALL)
-        if json_match:
-            q_data = json.loads(json_match.group())
-            return {
-                "id": index + 1,
-                "type": "tf",
-                "stem": q_data.get("stem", ""),
-                "statement_a": q_data.get("statement_a", ""),
-                "statement_b": q_data.get("statement_b", ""),
-                "statement_c": q_data.get("statement_c", ""),
-                "statement_d": q_data.get("statement_d", ""),
-                "statement_e": q_data.get("statement_e", ""),
-                "answer_a": q_data.get("answer_a", True),
-                "answer_b": q_data.get("answer_b", False),
-                "answer_c": q_data.get("answer_c", True),
-                "answer_d": q_data.get("answer_d", False),
-                "answer_e": q_data.get("answer_e", True),
-                "explanation_a": q_data.get("explanation_a", ""),
-                "explanation_b": q_data.get("explanation_b", ""),
-                "explanation_c": q_data.get("explanation_c", ""),
-                "explanation_d": q_data.get("explanation_d", ""),
-                "explanation_e": q_data.get("explanation_e", ""),
-                "subject": subject
-            }
-
-    except Exception as e:
-        print(f"Groq T/F generation error: {e}")
+    q_data = _generate_json(prompt, 800)
+    if q_data and q_data.get("stem"):
+        return {
+            "id": index + 1,
+            "type": "tf",
+            "stem": q_data.get("stem", ""),
+            "statement_a": q_data.get("statement_a", ""),
+            "statement_b": q_data.get("statement_b", ""),
+            "statement_c": q_data.get("statement_c", ""),
+            "statement_d": q_data.get("statement_d", ""),
+            "statement_e": q_data.get("statement_e", ""),
+            "answer_a": q_data.get("answer_a", True),
+            "answer_b": q_data.get("answer_b", False),
+            "answer_c": q_data.get("answer_c", True),
+            "answer_d": q_data.get("answer_d", False),
+            "answer_e": q_data.get("answer_e", True),
+            "explanation_a": q_data.get("explanation_a", ""),
+            "explanation_b": q_data.get("explanation_b", ""),
+            "explanation_c": q_data.get("explanation_c", ""),
+            "explanation_d": q_data.get("explanation_d", ""),
+            "explanation_e": q_data.get("explanation_e", ""),
+            "subject": subject
+        }
 
     return _fallback_tf_question(subject, index)
 
@@ -268,7 +256,8 @@ Also add a clinical pearl at the end."""
         client = Groq(api_key=GROQ_API_KEY)
 
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
+            reasoning_effort="low",
             messages=[
                 {
                     "role": "system",
@@ -306,13 +295,14 @@ Reply with ONLY a single letter: a, b, c, d, or e"""
     try:
         client = Groq(api_key=GROQ_API_KEY)
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
+            reasoning_effort="low",
             messages=[
                 {"role": "system", "content": "You are a medical expert. Reply with only a single letter."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
-            max_tokens=5
+            max_tokens=300
         )
         answer = response.choices[0].message.content.strip().lower()
         if answer in ['a','b','c','d','e']:
@@ -335,13 +325,14 @@ Reply with ONLY the word: true or false"""
     try:
         client = Groq(api_key=GROQ_API_KEY)
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
+            reasoning_effort="low",
             messages=[
                 {"role": "system", "content": "You are a medical expert. Reply with only true or false."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
-            max_tokens=5
+            max_tokens=300
         )
         answer = response.choices[0].message.content.strip().lower()
         return answer == 'true'
@@ -387,7 +378,8 @@ Please explain:
         client = Groq(api_key=GROQ_API_KEY)
 
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
+            reasoning_effort="low",
             messages=[
                 {
                     "role": "system",
