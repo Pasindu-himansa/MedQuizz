@@ -204,7 +204,11 @@ export default function CustomSession() {
     setLoading(true);
     setError("");
     try {
-      const res = await API.post("/session/custom", { questions, mode });
+      const res = await API.post("/session/custom", {
+        questions,
+        mode,
+        name: name.trim() || null,
+      });
       navigate(`/waiting/${res.data.room_code}`);
     } catch (err) {
       setError("Failed to create session");

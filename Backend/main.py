@@ -2,13 +2,21 @@ from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Dict, List
+from typing import Dict, List, Optional
+from datetime import datetime, timedelta
+from sqlalchemy import func
+import os
 import random
 import string
 import json
+import secrets
+import hashlib
+import hmac
+import re
 from ai import load_model, explain_question, generate_single_question, generate_tf_question, explain_tf_question
 
-from database import get_db, create_tables, User, Question, Session as GameSession, SessionPlayer, Answer, SavedSession
+from database import get_db, create_tables, User, Question, Session as GameSession, SessionPlayer, Answer, SavedSession, EmailOTP, SessionResult
+from mailer import send_otp_email
 from auth import hash_password, verify_password, create_token, get_current_user
 
 from ai import load_model, explain_question, generate_single_question, generate_tf_question, explain_tf_question, get_ai_answer, get_ai_tf_answer
@@ -54,6 +62,23 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     university: str
+    otp: str
+
+class OTPRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    otp: str
+    new_password: str
+
+class UpdateProfileRequest(BaseModel):
+    name: str
+    university: str
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 class LoginRequest(BaseModel):
     email: str
@@ -67,7 +92,8 @@ class CreateSessionRequest(BaseModel):
 
 class CustomSessionRequest(BaseModel):
     questions: list
-    mode: str 
+    mode: str
+    name: Optional[str] = None
 
 class SavedSessionRequest(BaseModel):
     name: str
@@ -121,6 +147,12 @@ def clean_custom_questions(questions: list, mode: str) -> list:
         cleaned.append(item)
     return cleaned
 
+def iso_utc(dt):
+    """DB timestamps are stored as naive UTC; mark them so browsers convert to local time."""
+    if not dt:
+        return None
+    return dt.isoformat() + ("Z" if dt.tzinfo is None else "")
+
 def generate_room_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
@@ -164,18 +196,118 @@ async def startup():
     create_tables()
     load_model()
 
+# ── Email OTP helpers ─────────────────────────────────
+OTP_MINUTES_VALID = 10
+OTP_RESEND_SECONDS = 60
+OTP_MAX_ATTEMPTS = 5
+OTP_PEPPER = os.environ.get("OTP_PEPPER", "medquizz-otp")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+def normalize_email(email: str) -> str:
+    email = (email or "").strip().lower()
+    if not EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="Please enter a valid email address")
+    return email
+
+def check_password_strength(password: str):
+    if len(password or "") < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+def find_user_by_email(db: Session, email: str):
+    return db.query(User).filter(func.lower(User.email) == email).first()
+
+def hash_otp(email: str, purpose: str, code: str) -> str:
+    return hashlib.sha256(f"{email}:{purpose}:{code}:{OTP_PEPPER}".encode()).hexdigest()
+
+def issue_otp(db: Session, email: str, purpose: str):
+    now = datetime.utcnow()
+    latest = db.query(EmailOTP).filter(
+        EmailOTP.email == email, EmailOTP.purpose == purpose
+    ).order_by(EmailOTP.created_at.desc()).first()
+    if latest and latest.created_at and (now - latest.created_at).total_seconds() < OTP_RESEND_SECONDS:
+        wait = OTP_RESEND_SECONDS - int((now - latest.created_at).total_seconds())
+        raise HTTPException(status_code=429, detail=f"Please wait {wait} seconds before requesting another code")
+
+    db.query(EmailOTP).filter(EmailOTP.email == email, EmailOTP.purpose == purpose).delete()
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    otp = EmailOTP(
+        email=email,
+        purpose=purpose,
+        code_hash=hash_otp(email, purpose, code),
+        attempts=0,
+        created_at=now,
+        expires_at=now + timedelta(minutes=OTP_MINUTES_VALID)
+    )
+    db.add(otp)
+    db.commit()
+
+    try:
+        send_otp_email(email, code, purpose, OTP_MINUTES_VALID)
+    except Exception as e:
+        print(f"OTP email error: {e}")
+        db.delete(otp)
+        db.commit()
+        raise HTTPException(status_code=502, detail="Could not send the verification email. Please try again later.")
+
+def verify_otp(db: Session, email: str, purpose: str, code: str):
+    otp = db.query(EmailOTP).filter(
+        EmailOTP.email == email, EmailOTP.purpose == purpose
+    ).order_by(EmailOTP.created_at.desc()).first()
+    if not otp or otp.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Code expired or not found. Please request a new one.")
+    if otp.attempts >= OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=400, detail="Too many wrong attempts. Please request a new code.")
+    if not hmac.compare_digest(otp.code_hash, hash_otp(email, purpose, (code or "").strip())):
+        otp.attempts += 1
+        db.commit()
+        raise HTTPException(status_code=400, detail="Incorrect code")
+    db.delete(otp)
+    db.commit()
+
 # ── Auth Routes ───────────────────────────────────────
+@app.post("/auth/register/request-otp")
+def request_register_otp(req: OTPRequest, db: Session = Depends(get_db)):
+    email = normalize_email(req.email)
+    if find_user_by_email(db, email):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    issue_otp(db, email, "register")
+    return {"status": "sent"}
+
+@app.post("/auth/password/request-otp")
+def request_reset_otp(req: OTPRequest, db: Session = Depends(get_db)):
+    email = normalize_email(req.email)
+    # Same response whether or not the account exists, so emails can't be probed
+    if find_user_by_email(db, email):
+        issue_otp(db, email, "reset")
+    return {"status": "sent"}
+
+@app.post("/auth/password/reset")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    email = normalize_email(req.email)
+    check_password_strength(req.new_password)
+    user = find_user_by_email(db, email)
+    if not user:
+        raise HTTPException(status_code=400, detail="Code expired or not found. Please request a new one.")
+    verify_otp(db, email, "reset", req.otp)
+    user.password = hash_password(req.new_password)
+    db.commit()
+    return {"status": "reset"}
+
 @app.post("/register")
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == req.email).first()
-    if existing:
+    email = normalize_email(req.email)
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Please enter your name")
+    check_password_strength(req.password)
+    if find_user_by_email(db, email):
         raise HTTPException(status_code=400, detail="Email already registered")
+    verify_otp(db, email, "register", req.otp)
 
     user = User(
-        name=req.name,
-        email=req.email,
+        name=req.name.strip(),
+        email=email,
         password=hash_password(req.password),
-        university=req.university
+        university=req.university.strip()
     )
     db.add(user)
     db.commit()
@@ -186,7 +318,7 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
 
 @app.post("/login")
 def login(req: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == req.email).first()
+    user = find_user_by_email(db, (req.email or "").strip().lower())
     if not user or not verify_password(req.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -287,11 +419,12 @@ def create_custom_session(
     current_user: User = Depends(get_current_user)
 ):
     room_code = generate_room_code()
+    session_name = (req.name or "").strip()[:100] or "Custom"
 
     session = GameSession(
         room_code=room_code,
         host_id=current_user.id,
-        subject="Custom",
+        subject=session_name,
         status="waiting"
     )
     db.add(session)
@@ -313,7 +446,7 @@ def create_custom_session(
 
     session_questions[room_code] = processed
     session_config[room_code] = {
-        'subject': 'Custom',
+        'subject': session_name,
         'difficulty': 'custom',
         'num_questions': len(processed),
         'mode': req.mode,
@@ -335,7 +468,7 @@ def saved_session_to_dict(saved: SavedSession) -> dict:
         "mode": saved.mode,
         "num_questions": len(questions),
         "questions": questions,
-        "updated_at": saved.updated_at.isoformat() if saved.updated_at else None
+        "updated_at": iso_utc(saved.updated_at)
     }
 
 def clean_saved_name(name: str) -> str:
@@ -791,6 +924,10 @@ async def next_question(
     if session.current_question >= total:
         session.status = "finished"
         db.commit()
+        # Store every player's result so it survives restarts and shows on their account page
+        players = db.query(SessionPlayer).filter(SessionPlayer.session_id == session.id).all()
+        for p in players:
+            save_session_result(db, session, p.user_id, calculate_score(room_code, session, p.user_id, db))
         await manager.broadcast(room_code, {"type": "session_finished"})
         return {"status": "finished"}
 
@@ -800,6 +937,25 @@ async def next_question(
     })
 
     return {"status": "next", "question_number": session.current_question + 1}
+
+def save_session_result(db: Session, session: GameSession, user_id: int, score: dict):
+    if score["total"] == 0:
+        return
+    config = session_config.get(session.room_code, {})
+    result = db.query(SessionResult).filter(
+        SessionResult.user_id == user_id,
+        SessionResult.session_id == session.id
+    ).first()
+    if not result:
+        result = SessionResult(user_id=user_id, session_id=session.id, room_code=session.room_code)
+        db.add(result)
+    result.subject = session.subject
+    result.mode = score["mode"]
+    result.difficulty = config.get("difficulty")
+    result.earned = score["earned"]
+    result.total = score["total"]
+    result.percentage = score["percentage"]
+    db.commit()
 
 @app.get("/session/{room_code}/score")
 def get_score(
@@ -814,6 +970,28 @@ def get_score(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    if room_code in session_questions:
+        score = calculate_score(room_code, session, current_user.id, db)
+        if session.status == "finished":
+            save_session_result(db, session, current_user.id, score)
+        return score
+
+    # Questions are gone from memory (server restarted) - fall back to the stored summary
+    stored = db.query(SessionResult).filter(
+        SessionResult.user_id == current_user.id,
+        SessionResult.session_id == session.id
+    ).first()
+    if not stored:
+        raise HTTPException(status_code=404, detail="Score is no longer available for this session")
+    return {
+        "earned": stored.earned,
+        "total": stored.total,
+        "percentage": stored.percentage,
+        "mode": stored.mode,
+        "question_results": []
+    }
+
+def calculate_score(room_code: str, session: GameSession, user_id: int, db: Session) -> dict:
     questions = session_questions.get(room_code, [])
     mode = session_config.get(room_code, {}).get('mode', 'sba')
     total_marks = 0
@@ -825,14 +1003,14 @@ def get_score(
         answer = db.query(Answer).filter(
             Answer.session_id == session.id,
             Answer.question_id == q["id"],
-            Answer.user_id == current_user.id
+            Answer.user_id == user_id
         ).first()
 
         if mode == 'sba':
             total_marks += 1
             correct = q.get('correct_answer', '')
             user_answer = answer.answer if answer else None
-            is_correct = user_answer == correct
+            is_correct = user_answer is not None and user_answer == correct
 
             if is_correct:
                 earned_marks += 1
@@ -892,6 +1070,91 @@ def get_score(
         "percentage": round((earned_marks / total_marks * 100) if total_marks > 0 else 0, 1),
         "mode": mode,
         "question_results": question_results
+    }
+
+# ── My Account ────────────────────────────────────────
+def user_to_dict(user: User) -> dict:
+    return {"id": user.id, "name": user.name, "email": user.email, "university": user.university}
+
+@app.get("/me")
+def get_me(current_user: User = Depends(get_current_user)):
+    return user_to_dict(current_user)
+
+@app.put("/me")
+def update_me(
+    req: UpdateProfileRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    if len(name) > 100 or len(req.university.strip()) > 100:
+        raise HTTPException(status_code=400, detail="Name and batch must be 100 characters or less")
+    current_user.name = name
+    current_user.university = req.university.strip()
+    db.commit()
+    return user_to_dict(current_user)
+
+@app.post("/me/password")
+def change_password(
+    req: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not verify_password(req.current_password, current_user.password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    check_password_strength(req.new_password)
+    current_user.password = hash_password(req.new_password)
+    db.commit()
+    return {"status": "changed"}
+
+@app.get("/me/progress")
+def get_progress(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    results = db.query(SessionResult).filter(
+        SessionResult.user_id == current_user.id
+    ).order_by(SessionResult.created_at.asc(), SessionResult.id.asc()).all()
+
+    sessions_joined = db.query(SessionPlayer).filter(SessionPlayer.user_id == current_user.id).count()
+    sessions_hosted = db.query(GameSession).filter(GameSession.host_id == current_user.id).count()
+    questions_answered = db.query(Answer).filter(Answer.user_id == current_user.id).count()
+
+    total_earned = sum(r.earned for r in results)
+    total_possible = sum(r.total for r in results)
+
+    by_subject = {}
+    for r in results:
+        key = r.subject or "Other"
+        s = by_subject.setdefault(key, {"subject": key, "sessions": 0, "earned": 0, "total": 0})
+        s["sessions"] += 1
+        s["earned"] += r.earned
+        s["total"] += r.total
+    subjects = sorted(
+        [{**s, "percentage": round(s["earned"] / s["total"] * 100, 1) if s["total"] else 0} for s in by_subject.values()],
+        key=lambda s: s["sessions"], reverse=True
+    )
+
+    return {
+        "sessions_joined": sessions_joined,
+        "sessions_hosted": sessions_hosted,
+        "sessions_completed": len(results),
+        "questions_answered": questions_answered,
+        "overall_percentage": round(total_earned / total_possible * 100, 1) if total_possible else None,
+        "best_percentage": max((r.percentage for r in results), default=None),
+        "subjects": subjects,
+        "results": [{
+            "room_code": r.room_code,
+            "subject": r.subject,
+            "mode": r.mode,
+            "difficulty": r.difficulty,
+            "earned": r.earned,
+            "total": r.total,
+            "percentage": r.percentage,
+            "date": iso_utc(r.created_at)
+        } for r in results]
     }
 
 # ── WebSocket ─────────────────────────────────────────

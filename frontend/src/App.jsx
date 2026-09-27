@@ -6,6 +6,8 @@ import WaitingRoom from "./pages/WaitingRoom";
 import Session from "./pages/Session";
 import CustomSession from "./pages/CustomSession";
 import ScorePage from "./pages/ScorePage";
+import ForgotPassword from "./pages/ForgotPassword";
+import Account from "./pages/Account";
 
 function PrivateRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -19,6 +21,15 @@ export default function App() {
         <Route path="/" element={<Navigate to="/dashboard" />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route
+          path="/account"
+          element={
+            <PrivateRoute>
+              <Account />
+            </PrivateRoute>
+          }
+        />
         <Route
           path="/dashboard"
           element={

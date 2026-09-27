@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../api";
-import { CirclePlus, UsersRound, FilePlusCorner } from "lucide-react";
+import {
+  CirclePlus,
+  UsersRound,
+  FilePlusCorner,
+  CircleUserRound,
+  LogOut,
+} from "lucide-react";
 import { GiHealthNormal } from "react-icons/gi";
 
 export default function Dashboard() {
@@ -92,15 +98,23 @@ export default function Dashboard() {
             </h1>
             <p className="text-white/60 text-sm">Welcome, {name}!</p>
           </div>
-          <button
-            onClick={() => {
-              localStorage.clear();
-              navigate("/login");
-            }}
-            className="text-white/50 hover:text-red-300 text-sm font-medium transition"
-          >
-            Logout
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => navigate("/account")}
+              className="flex items-center gap-1 text-white/60 hover:text-white text-sm font-medium transition"
+            >
+              <CircleUserRound size={18} /> My Account
+            </button>
+            <button
+              onClick={() => {
+                localStorage.clear();
+                navigate("/login");
+              }}
+              className="flex items-center gap-1 text-white/50 hover:text-red-300 text-sm font-medium transition"
+            >
+              <LogOut size={16} /> Logout
+            </button>
+          </div>
         </div>
 
         {error && (

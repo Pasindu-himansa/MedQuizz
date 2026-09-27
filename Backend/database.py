@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text, DateTime, func
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text, DateTime, Float, UniqueConstraint, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 import os
@@ -73,6 +73,31 @@ class SavedSession(Base):
     questions = Column(Text)  # JSON list of question dicts
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+class EmailOTP(Base):
+    __tablename__ = "email_otps"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, index=True)
+    purpose = Column(String)  # "register" or "reset"
+    code_hash = Column(String)
+    attempts = Column(Integer, default=0)
+    created_at = Column(DateTime)
+    expires_at = Column(DateTime)
+
+class SessionResult(Base):
+    __tablename__ = "session_results"
+    __table_args__ = (UniqueConstraint("user_id", "session_id"),)
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"))
+    room_code = Column(String)
+    subject = Column(String)
+    mode = Column(String)
+    difficulty = Column(String)
+    earned = Column(Integer)
+    total = Column(Integer)
+    percentage = Column(Float)
+    created_at = Column(DateTime, server_default=func.now())
 
 def get_db():
     db = SessionLocal()

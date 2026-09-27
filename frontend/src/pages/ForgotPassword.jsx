@@ -5,15 +5,12 @@ import { ArrowLeft, LoaderCircle, MailCheck } from "lucide-react";
 
 const RESEND_SECONDS = 60;
 
-export default function Register() {
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    password: "",
-    university: "",
-  });
-  const [step, setStep] = useState("details");
+export default function ForgotPassword() {
+  const [step, setStep] = useState("email");
+  const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [cooldown, setCooldown] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,15 +22,12 @@ export default function Register() {
     return () => clearTimeout(t);
   }, [cooldown]);
 
-  const handleChange = (e) =>
-    setForm({ ...form, [e.target.name]: e.target.value });
-
   const sendCode = async () => {
     setLoading(true);
     setError("");
     try {
-      await API.post("/auth/register/request-otp", { email: form.email });
-      setStep("verify");
+      await API.post("/auth/password/request-otp", { email });
+      setStep("reset");
       setOtp("");
       setCooldown(RESEND_SECONDS);
     } catch (err) {
@@ -44,22 +38,27 @@ export default function Register() {
 
   const handleSendCode = (e) => {
     e.preventDefault();
-    if (form.password.length < 6)
-      return setError("Password must be at least 6 characters");
     sendCode();
   };
 
-  const handleVerify = async (e) => {
+  const handleReset = async (e) => {
     e.preventDefault();
+    if (password.length < 6)
+      return setError("Password must be at least 6 characters");
+    if (password !== confirm) return setError("Passwords do not match");
     setLoading(true);
     setError("");
     try {
-      const res = await API.post("/register", { ...form, otp });
-      localStorage.setItem("token", res.data.token);
-      localStorage.setItem("name", res.data.name);
-      navigate("/dashboard");
+      await API.post("/auth/password/reset", {
+        email,
+        otp,
+        new_password: password,
+      });
+      navigate("/login", {
+        state: { notice: "Password reset. You can now log in." },
+      });
     } catch (err) {
-      setError(err.response?.data?.detail || "Registration failed");
+      setError(err.response?.data?.detail || "Could not reset password");
     }
     setLoading(false);
   };
@@ -74,45 +73,24 @@ export default function Register() {
       <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white">MedQuizz</h1>
-          <p className="text-white/60 mt-2">
-            {step === "details" ? "Create your account" : "Verify your email"}
-          </p>
+          <p className="text-white/60 mt-2">Reset your password</p>
         </div>
 
-        {step === "details" && (
+        {step === "email" && (
           <form onSubmit={handleSendCode} className="space-y-4">
-            {["name", "email", "password", "university"].map((field) => (
-              <div key={field}>
-                <label className="block text-sm font-medium text-white/80 mb-1 capitalize">
-                  {field === "university"
-                    ? "Batch"
-                    : field.charAt(0).toUpperCase() + field.slice(1)}
-                </label>
-                <input
-                  type={
-                    field === "password"
-                      ? "password"
-                      : field === "email"
-                        ? "email"
-                        : "text"
-                  }
-                  name={field}
-                  value={form[field]}
-                  onChange={handleChange}
-                  className={inputClass}
-                  placeholder={
-                    field === "name"
-                      ? "Your Name Here"
-                      : field === "email"
-                        ? "your@email.com"
-                        : field === "password"
-                          ? "At least 6 characters"
-                          : "Your Batch"
-                  }
-                  required
-                />
-              </div>
-            ))}
+            <div>
+              <label className="block text-sm font-medium text-white/80 mb-1">
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className={inputClass}
+                placeholder="your@email.com"
+                required
+              />
+            </div>
 
             {error && (
               <div className="bg-red-500/20 border border-red-400/30 text-red-200 px-4 py-3 rounded-lg text-sm">
@@ -122,24 +100,24 @@ export default function Register() {
 
             <button type="submit" disabled={loading} className={buttonClass}>
               {loading && <LoaderCircle size={18} className="animate-spin" />}
-              {loading ? "Sending code..." : "Continue"}
+              {loading ? "Sending code..." : "Send reset code"}
             </button>
           </form>
         )}
 
-        {step === "verify" && (
-          <form onSubmit={handleVerify} className="space-y-4">
+        {step === "reset" && (
+          <form onSubmit={handleReset} className="space-y-4">
             <div className="bg-indigo-500/20 border border-indigo-400/30 rounded-xl p-3 text-sm text-indigo-100 flex items-start gap-2">
               <MailCheck size={18} className="flex-shrink-0 mt-0.5" />
               <span>
-                We sent a 6-digit code to <strong>{form.email}</strong>. Check
-                your inbox (and spam folder).
+                If an account exists for <strong>{email}</strong>, we sent it a
+                6-digit code. Check your inbox (and spam folder).
               </span>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-white/80 mb-1">
-                Verification code
+                Reset code
               </label>
               <input
                 type="text"
@@ -151,6 +129,34 @@ export default function Register() {
                 className={`${inputClass} text-center text-2xl tracking-[0.5em] font-bold`}
                 placeholder="000000"
                 autoFocus
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/80 mb-1">
+                New password
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={inputClass}
+                placeholder="At least 6 characters"
+                autoComplete="new-password"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/80 mb-1">
+                Confirm new password
+              </label>
+              <input
+                type="password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                className={inputClass}
+                placeholder="Repeat the new password"
+                autoComplete="new-password"
                 required
               />
             </div>
@@ -167,19 +173,19 @@ export default function Register() {
               className={buttonClass}
             >
               {loading && <LoaderCircle size={18} className="animate-spin" />}
-              {loading ? "Creating account..." : "Verify & Create Account"}
+              {loading ? "Resetting..." : "Reset Password"}
             </button>
 
             <div className="flex justify-between items-center text-sm">
               <button
                 type="button"
                 onClick={() => {
-                  setStep("details");
+                  setStep("email");
                   setError("");
                 }}
                 className="flex items-center gap-1 text-white/50 hover:text-white transition"
               >
-                <ArrowLeft size={14} /> Change details
+                <ArrowLeft size={14} /> Change email
               </button>
               <button
                 type="button"
@@ -194,12 +200,12 @@ export default function Register() {
         )}
 
         <p className="text-center text-white/50 mt-6">
-          Already have an account?{" "}
+          Remembered it?{" "}
           <Link
             to="/login"
             className="text-indigo-300 font-semibold hover:text-indigo-200"
           >
-            Login
+            Back to Login
           </Link>
         </p>
       </div>

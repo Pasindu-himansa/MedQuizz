@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import API from "../api";
-import { GiBrain } from "react-icons/gi";
+import { Brain, CircleCheck } from "lucide-react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -9,6 +9,7 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const notice = useLocation().state?.notice;
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -32,9 +33,15 @@ export default function Login() {
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white">MedQuizz</h1>
           <p className="text-white/60 mt-2 flex items-center justify-center gap-2">
-            Powered with AI <GiBrain />
+            Powered with AI <Brain size={16} />
           </p>
         </div>
+
+        {notice && (
+          <div className="flex items-center gap-2 bg-green-500/20 border border-green-400/30 text-green-200 px-4 py-3 rounded-lg text-sm mb-4">
+            <CircleCheck size={16} /> {notice}
+          </div>
+        )}
 
         {/* Form */}
         <form onSubmit={handleLogin} className="space-y-4">
@@ -53,9 +60,17 @@ export default function Login() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-white/80 mb-1">
-              Password
-            </label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-sm font-medium text-white/80">
+                Password
+              </label>
+              <Link
+                to="/forgot-password"
+                className="text-xs text-indigo-300 hover:text-indigo-200 font-medium"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <input
               type="password"
               value={password}
