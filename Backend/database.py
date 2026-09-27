@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text, DateTime, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 import os
@@ -63,6 +63,16 @@ class Answer(Base):
     question_id = Column(Integer)  # AI-generated questions live in memory, not in the questions table
     user_id = Column(Integer, ForeignKey("users.id"))
     answer = Column(String)
+
+class SavedSession(Base):
+    __tablename__ = "saved_sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    name = Column(String)
+    mode = Column(String)
+    questions = Column(Text)  # JSON list of question dicts
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 def get_db():
     db = SessionLocal()

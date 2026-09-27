@@ -8,7 +8,7 @@ import string
 import json
 from ai import load_model, explain_question, generate_single_question, generate_tf_question, explain_tf_question
 
-from database import get_db, create_tables, User, Question, Session as GameSession, SessionPlayer, Answer
+from database import get_db, create_tables, User, Question, Session as GameSession, SessionPlayer, Answer, SavedSession
 from auth import hash_password, verify_password, create_token, get_current_user
 
 from ai import load_model, explain_question, generate_single_question, generate_tf_question, explain_tf_question, get_ai_answer, get_ai_tf_answer
@@ -69,6 +69,11 @@ class CustomSessionRequest(BaseModel):
     questions: list
     mode: str 
 
+class SavedSessionRequest(BaseModel):
+    name: str
+    mode: str
+    questions: list
+
 class AnswerRequest(BaseModel):
     room_code: str
     question_id: int
@@ -83,6 +88,38 @@ class TFAnswerRequest(BaseModel):
 session_questions: Dict[str, List] = {}
 session_config: Dict[str, dict] = {}
 session_generating: Dict[str, bool] = {}
+
+OPTION_KEYS = ['a', 'b', 'c', 'd', 'e']
+
+def clean_custom_questions(questions: list, mode: str) -> list:
+    """Keep only known fields; user-supplied answers are kept, blanks become None (AI decides at reveal)."""
+    if mode not in ('sba', 'tf'):
+        raise HTTPException(status_code=400, detail="Mode must be 'sba' or 'tf'")
+    if not questions:
+        raise HTTPException(status_code=400, detail="Add at least one question")
+    if len(questions) > 200:
+        raise HTTPException(status_code=400, detail="Too many questions (max 200)")
+
+    cleaned = []
+    for q in questions:
+        if not isinstance(q, dict):
+            raise HTTPException(status_code=400, detail="Invalid question format")
+        if mode == 'sba':
+            item = {f: str(q.get(f) or '').strip() for f in ['question'] + [f'option_{k}' for k in OPTION_KEYS]}
+            if not item['question']:
+                raise HTTPException(status_code=400, detail="Every question needs text")
+            correct = str(q.get('correct_answer') or '').strip().lower()
+            item['correct_answer'] = correct if correct in OPTION_KEYS else None
+        else:
+            item = {f: str(q.get(f) or '').strip() for f in ['stem'] + [f'statement_{k}' for k in OPTION_KEYS]}
+            if not item['stem']:
+                raise HTTPException(status_code=400, detail="Every question needs a stem")
+            for k in OPTION_KEYS:
+                value = q.get(f'answer_{k}')
+                item[f'answer_{k}'] = value if isinstance(value, bool) else None
+        item['mode'] = mode
+        cleaned.append(item)
+    return cleaned
 
 def generate_room_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -269,16 +306,10 @@ def create_custom_session(
     db.add(player)
     db.commit()
 
-    # Store questions as-is — no answers yet
-    processed = []
-    for i, q in enumerate(req.questions):
+    # Keep answers the user supplied; blanks stay None and AI determines them at reveal time
+    processed = clean_custom_questions(req.questions, req.mode)
+    for i, q in enumerate(processed):
         q['id'] = i + 1
-        # Mark as custom — AI will determine answers at reveal time
-        q['correct_answer'] = None
-        if q['mode'] == 'tf':
-            for key in ['a','b','c','d','e']:
-                q[f'answer_{key}'] = None
-        processed.append(q)
 
     session_questions[room_code] = processed
     session_config[room_code] = {
@@ -294,6 +325,88 @@ def create_custom_session(
         "room_code": room_code,
         "num_questions": len(processed)
     }
+
+# ── Saved custom sessions ─────────────────────────────
+def saved_session_to_dict(saved: SavedSession) -> dict:
+    questions = json.loads(saved.questions or "[]")
+    return {
+        "id": saved.id,
+        "name": saved.name,
+        "mode": saved.mode,
+        "num_questions": len(questions),
+        "questions": questions,
+        "updated_at": saved.updated_at.isoformat() if saved.updated_at else None
+    }
+
+def clean_saved_name(name: str) -> str:
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Please give the session a name")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="Name is too long (max 100 characters)")
+    return name
+
+def get_own_saved_session(saved_id: int, db: Session, current_user: User) -> SavedSession:
+    saved = db.query(SavedSession).filter(
+        SavedSession.id == saved_id,
+        SavedSession.user_id == current_user.id
+    ).first()
+    if not saved:
+        raise HTTPException(status_code=404, detail="Saved session not found")
+    return saved
+
+@app.get("/saved-sessions")
+def list_saved_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    saved = db.query(SavedSession).filter(
+        SavedSession.user_id == current_user.id
+    ).order_by(SavedSession.updated_at.desc(), SavedSession.id.desc()).all()
+    return [saved_session_to_dict(s) for s in saved]
+
+@app.post("/saved-sessions")
+def create_saved_session(
+    req: SavedSessionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    saved = SavedSession(
+        user_id=current_user.id,
+        name=clean_saved_name(req.name),
+        mode=req.mode,
+        questions=json.dumps(clean_custom_questions(req.questions, req.mode))
+    )
+    db.add(saved)
+    db.commit()
+    db.refresh(saved)
+    return saved_session_to_dict(saved)
+
+@app.put("/saved-sessions/{saved_id}")
+def update_saved_session(
+    saved_id: int,
+    req: SavedSessionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    saved = get_own_saved_session(saved_id, db, current_user)
+    saved.name = clean_saved_name(req.name)
+    saved.mode = req.mode
+    saved.questions = json.dumps(clean_custom_questions(req.questions, req.mode))
+    db.commit()
+    db.refresh(saved)
+    return saved_session_to_dict(saved)
+
+@app.delete("/saved-sessions/{saved_id}")
+def delete_saved_session(
+    saved_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    saved = get_own_saved_session(saved_id, db, current_user)
+    db.delete(saved)
+    db.commit()
+    return {"status": "deleted"}
 
 @app.post("/session/join/{room_code}")
 def join_session(
