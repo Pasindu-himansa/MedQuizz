@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -10,6 +11,8 @@ import random
 import string
 import json
 import secrets
+import time
+from collections import deque
 import hashlib
 import hmac
 import re
@@ -114,6 +117,7 @@ class TFAnswerRequest(BaseModel):
 session_questions: Dict[str, List] = {}
 session_config: Dict[str, dict] = {}
 session_generating: Dict[str, bool] = {}
+session_revealed: Dict[str, set] = {}  # question indexes whose answers were revealed
 
 OPTION_KEYS = ['a', 'b', 'c', 'd', 'e']
 
@@ -147,11 +151,26 @@ def clean_custom_questions(questions: list, mode: str) -> list:
         cleaned.append(item)
     return cleaned
 
+def current_question_or_error(room_code: str, session: GameSession) -> dict:
+    questions = session_questions.get(room_code, [])
+    idx = session.current_question
+    if idx >= len(questions):
+        raise HTTPException(
+            status_code=409,
+            detail="This question isn't available yet (it may still be generating, or the server restarted)"
+        )
+    return questions[idx]
+
 def iso_utc(dt):
     """DB timestamps are stored as naive UTC; mark them so browsers convert to local time."""
     if not dt:
         return None
     return dt.isoformat() + ("Z" if dt.tzinfo is None else "")
+
+def check_answering_open(room_code: str, session: GameSession, question_id: int):
+    idx = question_id - 1  # question ids are 1-based positions
+    if idx != session.current_question or idx in session_revealed.get(room_code, set()):
+        raise HTTPException(status_code=400, detail="Answers are closed for this question")
 
 def generate_room_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -232,6 +251,35 @@ def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
 def hash_otp(email: str, purpose: str, code: str) -> str:
     return hashlib.sha256(f"{email}:{purpose}:{code}:{OTP_PEPPER}".encode()).hexdigest()
 
+OTP_REQUESTS_PER_IP = 5            # per client, per window below
+OTP_IP_WINDOW_SECONDS = 15 * 60
+OTP_DAILY_EMAIL_CAP = int(os.environ.get("OTP_DAILY_EMAIL_CAP", "300"))  # Gmail allows ~500 sends/day
+_otp_requests_by_ip: Dict[str, deque] = {}
+_otp_emails_sent = {"day": None, "count": 0}
+
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    return forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+
+def check_otp_ip_limit(request: Request):
+    now = time.time()
+    hits = _otp_requests_by_ip.setdefault(client_ip(request), deque())
+    while hits and now - hits[0] > OTP_IP_WINDOW_SECONDS:
+        hits.popleft()
+    if len(hits) >= OTP_REQUESTS_PER_IP:
+        print(f"OTP rate limit hit for {client_ip(request)} (x-forwarded-for: {request.headers.get('x-forwarded-for')})")
+        raise HTTPException(status_code=429, detail="Too many code requests. Please try again in a few minutes.")
+    hits.append(now)
+
+def reserve_daily_email_slot():
+    today = datetime.utcnow().date()
+    if _otp_emails_sent["day"] != today:
+        _otp_emails_sent.update(day=today, count=0)
+    if _otp_emails_sent["count"] >= OTP_DAILY_EMAIL_CAP:
+        print(f"OTP daily email cap ({OTP_DAILY_EMAIL_CAP}) reached - refusing to send more today")
+        raise HTTPException(status_code=503, detail="Email verification is busy right now. Please try again later.")
+    _otp_emails_sent["count"] += 1
+
 def issue_otp(db: Session, email: str, purpose: str):
     now = datetime.utcnow()
     latest = db.query(EmailOTP).filter(
@@ -241,6 +289,7 @@ def issue_otp(db: Session, email: str, purpose: str):
         wait = OTP_RESEND_SECONDS - int((now - latest.created_at).total_seconds())
         raise HTTPException(status_code=429, detail=f"Please wait {wait} seconds before requesting another code")
 
+    reserve_daily_email_slot()
     db.query(EmailOTP).filter(EmailOTP.email == email, EmailOTP.purpose == purpose).delete()
     code = f"{secrets.randbelow(1_000_000):06d}"
     otp = EmailOTP(
@@ -279,7 +328,8 @@ def verify_otp(db: Session, email: str, purpose: str, code: str):
 
 # ── Auth Routes ───────────────────────────────────────
 @app.post("/auth/register/request-otp")
-def request_register_otp(req: OTPRequest, db: Session = Depends(get_db)):
+def request_register_otp(req: OTPRequest, request: Request, db: Session = Depends(get_db)):
+    check_otp_ip_limit(request)
     email = normalize_email(req.email)
     if find_user_by_email(db, email):
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -287,7 +337,8 @@ def request_register_otp(req: OTPRequest, db: Session = Depends(get_db)):
     return {"status": "sent"}
 
 @app.post("/auth/password/request-otp")
-def request_reset_otp(req: OTPRequest, db: Session = Depends(get_db)):
+def request_reset_otp(req: OTPRequest, request: Request, db: Session = Depends(get_db)):
+    check_otp_ip_limit(request)
     email = normalize_email(req.email)
     # Same response whether or not the account exists, so emails can't be probed
     user = find_user_by_email(db, email)
@@ -643,6 +694,7 @@ async def submit_answer(
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    check_answering_open(room_code, session, req.question_id)
 
     # Update answer if exists, otherwise create new
     existing = db.query(Answer).filter(
@@ -697,17 +749,19 @@ async def reveal_answer(
     if session.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only host can reveal")
 
-    questions = session_questions.get(room_code, [])
+    q = current_question_or_error(room_code, session)
     idx = session.current_question
-    q = questions[idx]
     mode = session_config.get(room_code, {}).get('mode', 'sba')
     is_custom = session_config.get(room_code, {}).get('is_custom', False)
+    # Close answering for this question before anything else (see submit_answer)
+    session_revealed.setdefault(room_code, set()).add(idx)
 
     # For custom sessions — AI determines answers at reveal time
     if is_custom:
         if mode == 'sba' and not q.get('correct_answer'):
             print("Custom session: AI determining correct answer...")
-            q['correct_answer'] = get_ai_answer(
+            q['correct_answer'] = await run_in_threadpool(
+                get_ai_answer,
                 question=q['question'],
                 options={
                     'a': q['option_a'],
@@ -723,7 +777,8 @@ async def reveal_answer(
             print("Custom session: AI determining T/F answers...")
             for key in ['a','b','c','d','e']:
                 if q.get(f'answer_{key}') is None:
-                    q[f'answer_{key}'] = get_ai_tf_answer(
+                    q[f'answer_{key}'] = await run_in_threadpool(
+                        get_ai_tf_answer,
                         stem=q['stem'],
                         statement=q[f'statement_{key}']
                     )
@@ -775,6 +830,7 @@ async def submit_tf_answer(
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    check_answering_open(room_code, session, req.question_id)
 
     # Store T/F answers as JSON string
     existing = db.query(Answer).filter(
@@ -831,15 +887,15 @@ async def explain_answer(
     if session.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only host can explain")
 
-    questions = session_questions.get(room_code, [])
+    q = current_question_or_error(room_code, session)
     idx = session.current_question
-    q = questions[idx]
     mode = session_config.get(room_code, {}).get('mode', 'sba')
 
     print(f"Generating AI explanation for question {idx+1} ({mode} mode)...")
 
     if mode == 'tf':
-        explanation = explain_tf_question(
+        explanation = await run_in_threadpool(
+            explain_tf_question,
             stem=q["stem"],
             statements={
                 "a": q["statement_a"],
@@ -857,7 +913,8 @@ async def explain_answer(
             }
         )
     else:
-        explanation = explain_question(
+        explanation = await run_in_threadpool(
+            explain_question,
             question=q["question"],
             options={
                 "a": q["option_a"],
@@ -876,48 +933,6 @@ async def explain_answer(
 
     return {"status": "explained"}
 
-@app.post("/session/{room_code}/explain")
-async def explain_answer(
-    room_code: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    session = db.query(GameSession).filter(
-        GameSession.room_code == room_code
-    ).first()
-
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if session.host_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Only host can explain")
-
-    questions = session_questions.get(room_code, [])
-    idx = session.current_question
-    q = questions[idx]
-
-    print(f"Generating AI explanation for question {idx+1}...")
-
-    # Generate AI explanation using local model
-    explanation = explain_question(
-        question=q["question"],
-        options={
-            "a": q["option_a"],
-            "b": q["option_b"],
-            "c": q["option_c"],
-            "d": q["option_d"],
-            "e": q["option_e"]
-        },
-        correct_answer=q["correct_answer"]
-    )
-
-    # Broadcast explanation to all players
-    await manager.broadcast(room_code, {
-        "type": "explanation",
-        "explanation": explanation
-    })
-
-    return {"status": "explained"}
-
 @app.post("/session/{room_code}/next")
 async def next_question(
     room_code: str,
@@ -928,6 +943,8 @@ async def next_question(
         GameSession.room_code == room_code
     ).first()
 
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
     if session.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only host can move next")
 
@@ -1342,9 +1359,9 @@ def admin_usage(
 async def websocket_endpoint(websocket: WebSocket, room_code: str):
     await manager.connect(websocket, room_code)
     try:
+        # Clients only listen. Every event comes from an authenticated HTTP endpoint,
+        # so anything a client sends here is ignored rather than broadcast to the room.
         while True:
-            data = await websocket.receive_text()
-            msg = json.loads(data)
-            await manager.broadcast(room_code, msg)
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_code)

@@ -53,25 +53,57 @@ def _record_usage(feature: str, usage=None, headers=None, error: str = None):
         print(f"Usage logging error: {e}")
 
 
+RATE_LIMIT_RETRIES = 3
+MAX_RATE_LIMIT_WAIT = 30  # seconds; longer waits (e.g. daily limit used up) fail straight away
+
+
+def _parse_duration(value):
+    """Groq sends waits like '7.66s', '1m26.4s' or '922ms'; retry-after is plain seconds."""
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    parts = re.findall(r"([\d.]+)(ms|h|m|s)", value)
+    if not parts:
+        return None
+    return sum(float(n) * {"ms": 0.001, "s": 1, "m": 60, "h": 3600}[u] for n, u in parts)
+
+
+def _rate_limit_wait(headers) -> float:
+    wait = _parse_duration(headers.get("retry-after")) or _parse_duration(headers.get("x-ratelimit-reset-tokens"))
+    return wait if wait is not None else 5.0
+
+
 def _chat(feature: str, messages: list, temperature: float, max_tokens: int) -> str:
     client = Groq(api_key=GROQ_API_KEY)
-    try:
-        raw = client.chat.completions.with_raw_response.create(
-            model=GROQ_MODEL,
-            reasoning_effort="low",
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-    except groq.APIStatusError as e:
-        _record_usage(feature, headers=e.response.headers, error=f"HTTP {e.status_code}")
-        raise
-    except Exception as e:
-        _record_usage(feature, error=type(e).__name__)
-        raise
-    response = raw.parse()
-    _record_usage(feature, response.usage, raw.headers)
-    return (response.choices[0].message.content or "").strip()
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        try:
+            raw = client.chat.completions.with_raw_response.create(
+                model=GROQ_MODEL,
+                reasoning_effort="low",
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+        except groq.RateLimitError as e:
+            _record_usage(feature, headers=e.response.headers, error="HTTP 429")
+            wait = _rate_limit_wait(e.response.headers)
+            if attempt < RATE_LIMIT_RETRIES and wait <= MAX_RATE_LIMIT_WAIT:
+                print(f"Groq rate limit ({feature}): waiting {wait:.1f}s before retrying")
+                time.sleep(wait + 0.5)
+                continue
+            raise
+        except groq.APIStatusError as e:
+            _record_usage(feature, headers=e.response.headers, error=f"HTTP {e.status_code}")
+            raise
+        except Exception as e:
+            _record_usage(feature, error=type(e).__name__)
+            raise
+        response = raw.parse()
+        _record_usage(feature, response.usage, raw.headers)
+        return (response.choices[0].message.content or "").strip()
 
 
 # ── Helpers: call Groq with retries & parse JSON robustly ──
