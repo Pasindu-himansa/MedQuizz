@@ -60,7 +60,7 @@ class Answer(Base):
     __tablename__ = "answers"
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("sessions.id"))
-    question_id = Column(Integer, ForeignKey("questions.id"))
+    question_id = Column(Integer)  # AI-generated questions live in memory, not in the questions table
     user_id = Column(Integer, ForeignKey("users.id"))
     answer = Column(String)
 
