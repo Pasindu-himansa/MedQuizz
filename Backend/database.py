@@ -122,6 +122,16 @@ class DeactivatedUser(Base):
     deactivated_at = Column(DateTime)
     deactivated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
+class SessionState(Base):
+    """Live room state (questions, settings, revealed answers) so sessions survive server restarts."""
+    __tablename__ = "session_state"
+    room_code = Column(String, primary_key=True)
+    config = Column(Text)       # JSON
+    questions = Column(Text)    # JSON list
+    generating = Column(Boolean, default=False)
+    revealed = Column(Text)     # JSON list of revealed question indexes
+    updated_at = Column(DateTime)
+
 def get_db():
     db = SessionLocal()
     try:

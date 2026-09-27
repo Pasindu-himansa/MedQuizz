@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -12,13 +12,14 @@ import string
 import json
 import secrets
 import time
+import threading
 from collections import deque
 import hashlib
 import hmac
 import re
 from ai import load_model, explain_question, generate_single_question, generate_tf_question, explain_tf_question
 
-from database import get_db, create_tables, User, Question, Session as GameSession, SessionPlayer, Answer, SavedSession, EmailOTP, SessionResult, AIUsage, DeactivatedUser
+from database import get_db, create_tables, User, Question, Session as GameSession, SessionPlayer, Answer, SavedSession, EmailOTP, SessionResult, AIUsage, DeactivatedUser, SessionState, SessionLocal
 from mailer import send_otp_email
 from auth import hash_password, verify_password, create_token, get_current_user
 
@@ -119,6 +120,58 @@ session_config: Dict[str, dict] = {}
 session_generating: Dict[str, bool] = {}
 session_revealed: Dict[str, set] = {}  # question indexes whose answers were revealed
 
+# ── Room state persistence ────────────────────────────
+# The dicts above are a cache. Every change is also saved to the session_state table, so a
+# Space restart (deploys, sleeping) doesn't end live sessions; rooms are reloaded on first use.
+_room_lock = threading.Lock()
+_generating_rooms = set()  # rooms with a generation thread running in this process
+
+def save_room_state(room_code: str):
+    db = SessionLocal()
+    try:
+        state = db.query(SessionState).filter(SessionState.room_code == room_code).first()
+        if not state:
+            state = SessionState(room_code=room_code)
+            db.add(state)
+        state.config = json.dumps(session_config.get(room_code, {}))
+        state.questions = json.dumps(session_questions.get(room_code, []))
+        state.generating = session_generating.get(room_code, False)
+        state.revealed = json.dumps(sorted(session_revealed.get(room_code, set())))
+        state.updated_at = datetime.utcnow()
+        db.commit()
+    except Exception as e:
+        print(f"Could not save state for room {room_code}: {e}")
+    finally:
+        db.close()
+
+def ensure_room_loaded(room_code: str):
+    if room_code in session_questions:
+        return
+    with _room_lock:
+        if room_code in session_questions:
+            return
+        db = SessionLocal()
+        try:
+            state = db.query(SessionState).filter(SessionState.room_code == room_code).first()
+        finally:
+            db.close()
+        if not state:
+            return
+        session_config[room_code] = json.loads(state.config or "{}")
+        session_revealed[room_code] = set(json.loads(state.revealed or "[]"))
+        session_generating[room_code] = bool(state.generating)
+        session_questions[room_code] = json.loads(state.questions or "[]")  # set last: marks the room loaded
+        print(f"Restored room {room_code} from the database")
+    if session_generating.get(room_code):
+        start_generation(room_code)  # generation was cut off by a restart - carry on
+
+def start_generation(room_code: str):
+    with _room_lock:
+        if room_code in _generating_rooms:
+            return
+        _generating_rooms.add(room_code)
+    threading.Thread(target=background_generate_questions, args=(room_code,), daemon=True).start()
+
 OPTION_KEYS = ['a', 'b', 'c', 'd', 'e']
 
 def clean_custom_questions(questions: list, mode: str) -> list:
@@ -176,15 +229,22 @@ def generate_room_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 def background_generate_questions(room_code: str):
+    try:
+        _generate_room_questions(room_code)
+    finally:
+        _generating_rooms.discard(room_code)
+
+def _generate_room_questions(room_code: str):
     config = session_config[room_code]
     subject = config['subject']
     difficulty = config['difficulty']
     total = config['num_questions']
     mode = config.get('mode', 'sba')
+    start = len(session_questions.get(room_code, []))
 
-    print(f"Starting background generation ({mode}) for room {room_code}...")
+    print(f"{'Resuming' if start else 'Starting'} background generation ({mode}) for room {room_code} at question {start + 1}...")
 
-    for i in range(total):
+    for i in range(start, total):
         if room_code not in session_questions:
             break
 
@@ -204,9 +264,11 @@ def background_generate_questions(room_code: str):
             )
 
         session_questions[room_code].append(q)
+        save_room_state(room_code)
         print(f"✅ Room {room_code}: Generated question {i+1}/{total}")
 
     session_generating[room_code] = False
+    save_room_state(room_code)
     print(f"✅ All {total} questions generated for room {room_code}!")
 
 # ── Startup ───────────────────────────────────────────
@@ -398,7 +460,6 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 @app.post("/session/create")
 def create_session(
     req: CreateSessionRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -431,9 +492,10 @@ def create_session(
     }
     session_questions[room_code] = []
     session_generating[room_code] = True
+    save_room_state(room_code)
 
     # Start generating questions in background
-    background_tasks.add_task(background_generate_questions, room_code)
+    start_generation(room_code)
 
     return {
         "room_code": room_code,
@@ -522,6 +584,7 @@ def create_custom_session(
         'is_custom': True
     }
     session_generating[room_code] = False
+    save_room_state(room_code)
 
     return {
         "room_code": room_code,
@@ -662,6 +725,7 @@ def get_current_question(
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    ensure_room_loaded(room_code)
 
     idx = session.current_question
     questions = session_questions.get(room_code, [])
@@ -696,6 +760,7 @@ async def submit_answer(
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    ensure_room_loaded(room_code)
     check_answering_open(room_code, session, req.question_id)
 
     # Update answer if exists, otherwise create new
@@ -748,6 +813,7 @@ async def reveal_answer(
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    ensure_room_loaded(room_code)
     if session.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only host can reveal")
 
@@ -785,6 +851,8 @@ async def reveal_answer(
                         statement=q[f'statement_{key}']
                     )
             session_questions[room_code][idx] = q
+
+    save_room_state(room_code)
 
     # Get answer summary
     answers = db.query(Answer).filter(
@@ -832,6 +900,7 @@ async def submit_tf_answer(
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    ensure_room_loaded(room_code)
     check_answering_open(room_code, session, req.question_id)
 
     # Store T/F answers as JSON string
@@ -886,6 +955,7 @@ async def explain_answer(
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    ensure_room_loaded(room_code)
     if session.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only host can explain")
 
@@ -947,6 +1017,7 @@ async def next_question(
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    ensure_room_loaded(room_code)
     if session.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only host can move next")
 
@@ -1004,6 +1075,7 @@ def get_score(
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    ensure_room_loaded(room_code)
 
     if room_code in session_questions:
         score = calculate_score(room_code, session, current_user.id, db)
